@@ -5,12 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flappy Bird Multiplayer</title>
     <style>
-        body { margin: 0; overflow: hidden; }
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
         canvas { display: block; background: #70c5ce; }
+        #menu { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+        button { padding: 15px 30px; font-size: 20px; cursor: pointer; border: none; background: #4CAF50; color: white; border-radius: 5px; }
+        button:hover { background: #45a049; }
+        #lobby { position: absolute; top: 20px; left: 20px; background: rgba(255, 255, 255, 0.8); padding: 10px; border-radius: 5px; }
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
+    <div id="menu">
+        <button id="startButton">Start Game</button>
+        <div id="lobby" style="display: none;">
+            <p>Waiting for players...</p>
+            <p>Share this link: <span id="gameLink"></span></p>
+        </div>
+    </div>
+    <canvas id="gameCanvas" style="display: none;"></canvas>
+
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
@@ -18,14 +30,33 @@
         canvas.height = 600;
 
         // Game variables
-        let bird1 = { x: 100, y: 300, width: 40, height: 30, velocity: 0, gravity: 0.6 };
-        let bird2 = { x: 150, y: 300, width: 40, height: 30, velocity: 0, gravity: 0.6 };
+        let gameStarted = false;
+        let birds = [
+            { x: 100, y: 300, width: 40, height: 30, velocity: 0, gravity: 0.3 }, // Reduced gravity
+            { x: 150, y: 300, width: 40, height: 30, velocity: 0, gravity: 0.3 }
+        ];
         let pipes = [];
         let frame = 0;
         let gameSpeed = 3;
         let pipeGap = 150;
         let pipeWidth = 80;
         let gameOver = false;
+
+        // Generate unique game link
+        const gameLink = window.location.href;
+        document.getElementById('gameLink').textContent = gameLink;
+
+        // Start game
+        document.getElementById('startButton').addEventListener('click', () => {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('lobby').style.display = 'block';
+            setTimeout(() => {
+                document.getElementById('lobby').style.display = 'none';
+                document.getElementById('gameCanvas').style.display = 'block';
+                gameStarted = true;
+                gameLoop();
+            }, 3000); // 3 second lobby timer
+        });
 
         // Draw bird
         function drawBird(bird, color) {
@@ -44,8 +75,10 @@
 
         // Update game state
         function update() {
+            if (!gameStarted) return;
+
             // Update birds
-            [bird1, bird2].forEach(bird => {
+            birds.forEach(bird => {
                 bird.velocity += bird.gravity;
                 bird.y += bird.velocity;
                 
@@ -70,7 +103,7 @@
                 pipe.x -= gameSpeed;
                 
                 // Check collisions
-                [bird1, bird2].forEach(bird => {
+                birds.forEach(bird => {
                     if (bird.x < pipe.x + pipe.width &&
                         bird.x + bird.width > pipe.x &&
                         (bird.y < pipe.top || bird.y + bird.height > canvas.height - pipe.bottom)) {
@@ -85,9 +118,11 @@
 
         // Draw everything
         function draw() {
+            if (!gameStarted) return;
+            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawBird(bird1, 'yellow');
-            drawBird(bird2, 'red');
+            drawBird(birds[0], 'yellow');
+            drawBird(birds[1], 'red');
             drawPipes();
         }
 
@@ -107,15 +142,15 @@
 
         // Handle input
         document.addEventListener('keydown', (e) => {
+            if (!gameStarted) return;
+            
             if (e.code === 'Space') {
-                bird1.velocity = -10;
+                birds[0].velocity = -8; // Reduced jump strength
             }
             if (e.code === 'ArrowUp') {
-                bird2.velocity = -10;
+                birds[1].velocity = -8;
             }
         });
-
-        gameLoop();
     </script>
 </body>
 </html>
