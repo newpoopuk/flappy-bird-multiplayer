@@ -91,9 +91,21 @@ window.onload = function() {
     console.log("Window loaded");
     initCanvas();
     setupEventListeners();
+    
+    // Initialize room status
+    roomStatus = {
+        "1": { players: 0, maxPlayers: 2, gameStarted: false },
+        "2": { players: 0, maxPlayers: 2, gameStarted: false },
+        "3": { players: 0, maxPlayers: 2, gameStarted: false },
+        "4": { players: 0, maxPlayers: 2, gameStarted: false }
+    };
+    
+    // Create initial room cards
+    createRoomCards();
+    
+    // Start periodic room status updates
     updateRoomStatus();
     setInterval(updateRoomStatus, 3000);
-    setupSocketEventDebugging();
 };
 
 // Setup event listeners
@@ -576,53 +588,58 @@ socket.on('gameReset', (data) => {
 // Update room status display
 function updateRoomStatus() {
     console.log("Requesting room status update");
-    if (!isSinglePlayer) {
-        socket.emit('getRoomStatus');
-    }
+    socket.emit('getRoomStatus');
 }
 
 // Create room cards
 function createRoomCards() {
     console.log("Creating room cards with status:", roomStatus);
-    if (isSinglePlayer) return;
-
+    
     // Make sure roomList element exists
+    const roomList = document.getElementById('roomList');
     if (!roomList) {
         console.error("Room list element not found!");
         return;
     }
 
     roomList.innerHTML = '';
+    
+    // Create cards for rooms 1-4
     for (let roomId = 1; roomId <= 4; roomId++) {
-        const room = roomStatus[roomId] || { players: 0, maxPlayers: 2, gameStarted: false };
+        const room = roomStatus[roomId.toString()] || { players: 0, maxPlayers: 2, gameStarted: false };
         const card = document.createElement('div');
-        card.className = `room-card ${room.players >= 2 ? 'full' : ''} ${room.gameStarted ? 'active' : ''}`;
+        card.className = 'room-card';
+        if (room.players >= 2) card.className += ' full';
+        if (room.gameStarted) card.className += ' active';
+        
         card.innerHTML = `
             <h2>Room ${roomId}</h2>
             <div class="player-count">${room.players}/2</div>
-            <div class="room-status">${room.gameStarted ? 'Game in Progress' : 'Waiting for Players'}</div>
+            <div class="room-status">
+                ${room.gameStarted ? 'Game in Progress' : 'Waiting for Players'}
+            </div>
         `;
         
-        if (room.players < 2) {
-            card.onclick = () => joinRoom(roomId);
+        if (room.players < 2 && !room.gameStarted) {
+            card.onclick = () => {
+                console.log(`Joining room ${roomId}`);
+                joinRoom(roomId);
+            };
         }
         
         roomList.appendChild(card);
     }
 }
 
-// Join a specific room
+// Join room function
 function joinRoom(roomId) {
-    isSinglePlayer = false;
-    currentRoom = roomId;
-    currentRoomId.textContent = roomId;
-    gameRoomId.textContent = roomId;
-    
-    resetGameState();
-    
+    console.log(`Attempting to join room ${roomId}`);
     socket.emit('joinRoom', roomId);
+    
+    // Show waiting screen
     menuScreen.style.display = 'none';
     waitingScreen.style.display = 'block';
+    currentRoomId.textContent = roomId;
 }
 
 // Setup socket event debugging
@@ -686,14 +703,14 @@ function setupSocketEventDebugging() {
     });
     
     socket.on('roomStatus', (status) => {
-        console.log('Room status update received:', status);
+        console.log('Room status received:', status);
         roomStatus = status;
         createRoomCards();
     });
 
     // Socket.IO event handler for room status updates
     socket.on('roomStatusUpdate', (update) => {
-        console.log('Room status update:', update);
+        console.log('Room status update received:', update);
         if (roomStatus[update.roomId]) {
             roomStatus[update.roomId].players = update.players;
             roomStatus[update.roomId].gameStarted = update.gameStarted;

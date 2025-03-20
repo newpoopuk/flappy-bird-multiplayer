@@ -93,10 +93,12 @@ io.on('connection', (socket) => {
       }
     }
     console.log('Sending room status:', roomStatus);
+    
+    // Send to requesting client
     socket.emit('roomStatus', roomStatus);
     
-    // Also broadcast updated room status to all clients
-    io.emit('roomStatus', roomStatus);
+    // Also broadcast to all other clients
+    socket.broadcast.emit('roomStatus', roomStatus);
   });
 
   // Start single player game
@@ -144,15 +146,18 @@ io.on('connection', (socket) => {
 
   // Join a specific room
   socket.on('joinRoom', (roomId) => {
+    console.log(`Player ${socket.id} attempting to join room ${roomId}`);
     const room = gameRooms[roomId];
     
     if (!room) {
+        console.log(`Room ${roomId} not found`);
         socket.emit('joinError', { message: 'Room not found' });
         return;
     }
     
     // Maximum 2 players
     if (room.players.length >= 2) {
+        console.log(`Room ${roomId} is full`);
         socket.emit('roomFull', { message: 'Room is full. Try another room.' });
         return;
     }
@@ -169,28 +174,39 @@ io.on('connection', (socket) => {
         velocity: 0
     });
     
+    console.log(`Player ${socket.id} joined room ${roomId}`);
+    
+    // Join the Socket.IO room
     socket.join(roomId);
     
+    // Notify the player they've joined
     socket.emit('roomJoined', { 
         roomId: roomId, 
         playerId: socket.id, 
         isHost: isFirstPlayer 
     });
     
+    // Notify all clients in the room about the new player
     io.to(roomId).emit('playerJoined', { 
         players: room.players 
     });
     
-    // Update room status for all clients
-    io.emit('roomStatusUpdate', {
-        roomId: roomId,
-        players: room.players.length,
-        maxPlayers: 2,
-        gameStarted: room.gameStarted
-    });
+    // Broadcast updated room status to all clients
+    const roomStatus = {};
+    for (const id in gameRooms) {
+        if (id !== "single") {
+            roomStatus[id] = {
+                players: gameRooms[id].players.length,
+                maxPlayers: 2,
+                gameStarted: gameRooms[id].gameStarted
+            };
+        }
+    }
+    io.emit('roomStatus', roomStatus);
     
-    // If two players, start the game after a countdown
+    // If two players, start the game
     if (room.players.length === 2) {
+        console.log(`Starting game in room ${roomId}`);
         room.gameStarted = true;
         
         // Reset game state
@@ -204,14 +220,6 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('gameStart', { 
             players: room.players,
             pipes: room.pipes
-        });
-        
-        // Update room status for all clients
-        io.emit('roomStatusUpdate', {
-            roomId: roomId,
-            players: room.players.length,
-            maxPlayers: 2,
-            gameStarted: true
         });
     }
   });
