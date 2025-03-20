@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird Multiplayer</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: Arial, sans-serif;
+            background: #333;
+        }
+        
+        canvas { 
+            display: block; 
+            background: #70c5ce; 
+            margin: 0 auto;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        #menu, #joinMenu, #waitingScreen, #gameOverScreen { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            text-align: center;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        
+        button { 
+            padding: 15px 30px; 
+            font-size: 18px; 
+            cursor: pointer; 
+            border: none; 
+            background: #4CAF50; 
+            color: white; 
+            border-radius: 5px;
+            margin: 10px;
+            transition: background 0.3s;
+        }
+        
+        button:hover { 
+            background: #45a049; 
+        }
+        
+        input {
+            padding: 15px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            width: 200px;
+            margin: 10px;
+        }
+        
+        #roomCode {
+            font-size: 24px;
+            font-weight: bold;
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        #gameCanvas {
+            display: none;
+            margin: 0 auto;
+            border: 3px solid black;
+            border-radius: 5px;
+        }
+        
+        #playerInfo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Main Menu -->
+        <div id="menu">
+            <h1>Flappy Bird Multiplayer</h1>
+            <button id="createRoomBtn">Create Room</button>
+            <button id="joinRoomBtn">Join Room</button>
+        </div>
+        
+        <!-- Join Room Menu -->
+        <div id="joinMenu" style="display: none;">
+            <h1>Join Room</h1>
+            <input type="text" id="roomIdInput" placeholder="Enter Room Code">
+            <button id="joinGameBtn">Join Game</button>
+            <button id="backToMenuBtn">Back</button>
+        </div>
+        
+        <!-- Waiting Screen -->
+        <div id="waitingScreen" style="display: none;">
+            <h1>Waiting for Player</h1>
+            <p>Share this code with a friend:</p>
+            <div id="roomCode"></div>
+            <button id="cancelWaitingBtn">Cancel</button>
+        </div>
+        
+        <!-- Game Over Screen -->
+        <div id="gameOverScreen" style="display: none;">
+            <h1>Game Over!</h1>
+            <p id="finalScore"></p>
+            <button id="playAgainBtn">Play Again</button>
+            <button id="mainMenuBtn">Main Menu</button>
+        </div>
+        
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- Player Info -->
+        <div id="playerInfo" style="display: none;">
+            <div id="playerScore">Score: 0</div>
+        </div>
+    </div>
+
+    <!-- Socket.IO Client -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- Game Client -->
+    <script src="js/game.js"></script>
+</body>
+</html> 
