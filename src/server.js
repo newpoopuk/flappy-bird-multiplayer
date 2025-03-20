@@ -75,27 +75,14 @@ const BIRD_WIDTH = 40;
 const BIRD_HEIGHT = 30;
 const PIPE_WIDTH = 80;
 const PIPE_GAP = 150;
-const GAME_SPEED = 180; // pixels per second
-const PIPE_SPAWN_INTERVAL = 1500; // milliseconds
-const GRAVITY = 600; // pixels per second squared
-const JUMP_VELOCITY = -400; // pixels per second
-const TARGET_FPS = 60;
-const FRAME_TIME = 1000 / TARGET_FPS;
+const GAME_SPEED = 3;
+const PIPE_SPAWN_INTERVAL = 90;
 
 // Default player positions with more separation
 const PLAYER_POSITIONS = {
     host: { x: 100, y: 250 },
     guest: { x: 100, y: 350 }
 };
-
-// Helper function to check collision between player and pipe
-function checkCollision(player, pipe) {
-    return (
-        player.x < pipe.x + pipe.width &&
-        player.x + player.width > pipe.x &&
-        (player.y < pipe.top || player.y + player.height > 600 - pipe.bottom)
-    );
-}
 
 // Initialize a new room
 function initializeRoom(roomId) {
@@ -105,8 +92,7 @@ function initializeRoom(roomId) {
             pipes: [],
             frameCount: 0,
             gameStarted: false,
-            lastUpdateTime: Date.now(),
-            lastPipeTime: Date.now()
+            lastUpdateTime: Date.now()
         };
     }
     return gameRooms[roomId];
@@ -120,8 +106,6 @@ function resetRoom(roomId) {
     room.pipes = [];
     room.frameCount = 0;
     room.gameStarted = false;
-    room.lastUpdateTime = Date.now();
-    room.lastPipeTime = Date.now();
     
     // Reset player positions and states
     room.players.forEach((player, index) => {
@@ -149,24 +133,24 @@ function gameLoop() {
             continue;
         }
         
-        // Calculate delta time in seconds
-        const deltaTime = (currentTime - room.lastUpdateTime) / 1000;
-        if (deltaTime < FRAME_TIME / 1000) continue; // Maintain target FPS
+        // Calculate delta time for smooth updates
+        const deltaTime = currentTime - room.lastUpdateTime;
+        if (deltaTime < 16) continue; // Cap at ~60 FPS
         
-        // Update frame counter
+        room.lastUpdateTime = currentTime;
         room.frameCount++;
         
-        // Update pipe positions using delta time
+        // Update pipe positions
         room.pipes.forEach(pipe => {
-            pipe.x -= GAME_SPEED * deltaTime;
+            pipe.x -= GAME_SPEED;
         });
         
         // Remove pipes that are off screen
         room.pipes = room.pipes.filter(pipe => pipe.x + pipe.width > 0);
         
-        // Spawn new pipes based on time instead of frames
-        const timeSinceLastPipe = currentTime - room.lastPipeTime;
-        if (timeSinceLastPipe >= PIPE_SPAWN_INTERVAL) {
+        // Spawn new pipes
+        if (room.frameCount % PIPE_SPAWN_INTERVAL === 0) {
+            const gap = PIPE_GAP;
             const minTop = 50;
             const maxTop = 300;
             const top = Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
@@ -174,27 +158,32 @@ function gameLoop() {
             room.pipes.push({
                 x: 800,
                 top: top,
-                bottom: 600 - (top + PIPE_GAP),
+                bottom: 600 - (top + gap),
                 width: PIPE_WIDTH,
                 passed: false
             });
-            
-            room.lastPipeTime = currentTime;
         }
         
         // Update player positions and check collisions
         room.players.forEach(player => {
             if (player.dead) return;
             
-            // Apply gravity using delta time
-            player.velocity += GRAVITY * deltaTime;
-            player.y += player.velocity * deltaTime;
+            // Apply gravity
+            player.velocity += 0.5;
+            player.y += player.velocity;
+            
+            // Check collisions
+            const playerBox = {
+                x: player.x,
+                y: player.y,
+                width: BIRD_WIDTH,
+                height: BIRD_HEIGHT
+            };
             
             // Ground collision
             if (player.y + BIRD_HEIGHT > 600) {
                 player.dead = true;
                 player.y = 600 - BIRD_HEIGHT;
-                player.velocity = 0;
             }
             
             // Ceiling collision
@@ -203,19 +192,16 @@ function gameLoop() {
                 player.velocity = 0;
             }
             
-            // Pipe collisions and scoring
+            // Pipe collisions
             room.pipes.forEach(pipe => {
-                if (!player.dead && checkCollision(player, pipe)) {
+                if (checkCollision(playerBox, pipe)) {
                     player.dead = true;
-                    return;
                 }
                 
                 // Score points
                 if (!pipe.passed && player.x > pipe.x + pipe.width) {
                     pipe.passed = true;
-                    if (!player.dead) {
-                        player.score++;
-                    }
+                    player.score++;
                 }
             });
         });
@@ -224,9 +210,14 @@ function gameLoop() {
         const gameState = {
             players: room.players,
             pipes: room.pipes,
-            frameCount: room.frameCount,
-            timestamp: currentTime
+            frameCount: room.frameCount
         };
+        
+        console.log(`Room ${roomId} update:`, {
+            playerCount: room.players.length,
+            pipeCount: room.pipes.length,
+            frame: room.frameCount
+        });
         
         io.to(roomId).emit('gameUpdate', gameState);
         
@@ -236,15 +227,7 @@ function gameLoop() {
             io.to(roomId).emit('gameOver', {
                 players: room.players
             });
-            
-            // Reset the room after a short delay
-            setTimeout(() => {
-                resetRoom(roomId);
-                broadcastRoomStatus();
-            }, 3000);
         }
-        
-        room.lastUpdateTime = currentTime;
     }
 }
 
@@ -352,7 +335,7 @@ io.on('connection', (socket) => {
         
         const player = room.players.find(p => p.id === socket.id);
         if (player && !player.dead) {
-            player.velocity = JUMP_VELOCITY;
+            player.velocity = -8;
             console.log(`Player ${socket.id} jumped in room ${roomId}`);
         }
     });
@@ -390,8 +373,8 @@ io.on('connection', (socket) => {
     });
 });
 
-// Start game loop with fixed time step
-setInterval(gameLoop, FRAME_TIME);
+// Start game loop
+setInterval(gameLoop, 16); // ~60 FPS
 
 // Start server
 const PORT = process.env.PORT || 3001;

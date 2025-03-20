@@ -11,18 +11,15 @@ const ctx = canvas.getContext('2d');
 canvas.width = 800;
 canvas.height = 600;
 
-// Game constants
-const GRAVITY = 600; // pixels per second squared
-const JUMP_VELOCITY = -400; // pixels per second
-const GAME_SPEED = 180; // pixels per second
-
 // Bird settings
 const bird = {
     x: 100,
     y: 300,
     width: 40,
     height: 30,
-    velocity: 0
+    velocity: 0,
+    jumpStrength: -8,  // upward force when jumping
+    maxFallSpeed: 12   // maximum downward velocity
 };
 
 // Physics settings
@@ -32,6 +29,8 @@ const gravity = 0.3;  // gravitational acceleration
 const pipeGap = 150;
 const pipeWidth = 80;
 const pipeSpawnInterval = 90; // in frames
+const gameSpeed = 3;
+let pipes = [];
 
 // Game state
 let frameCount = 0;
@@ -43,10 +42,7 @@ let isHost = false;
 let playerId = null;
 let players = [];
 let myPlayer = null;
-let lastUpdateTime = performance.now();
-let lastServerUpdate = null;
-let serverTimestamp = 0;
-let pipes = []; // Initialize pipes array
+let lastUpdateTime = Date.now();
 
 // Bird colors with better contrast
 const BIRD_COLORS = ['#FFD700', '#FF4444', '#4444FF', '#44FF44'];
@@ -185,9 +181,11 @@ function setupSocketEventHandlers() {
     socket.on('gameUpdate', (data) => {
         if (isSinglePlayer) return;
         
-        // Store server timestamp for interpolation
-        lastServerUpdate = performance.now();
-        serverTimestamp = data.timestamp;
+        console.log('Received game update:', {
+            playerCount: data.players.length,
+            pipeCount: data.pipes.length,
+            frame: data.frameCount
+        });
         
         // Update game state
         frameCount = data.frameCount;
@@ -252,24 +250,12 @@ function setupSocketEventHandlers() {
     });
 }
 
-// Check for collision between bird and pipe
-function checkCollision(bird, pipe) {
-    return (
-        bird.x < pipe.x + pipe.width &&
-        bird.x + bird.width > pipe.x &&
-        (bird.y < pipe.top || bird.y + bird.height > canvas.height - pipe.bottom)
-    );
-}
-
-// Reset game state
 function resetLocalState() {
     frameCount = 0;
     score = 0;
     gameOver = false;
-    pipes = [];
     bird.y = 300;
     bird.velocity = 0;
-    lastUpdateTime = performance.now();
 }
 
 // Game functions
@@ -278,6 +264,7 @@ function startSinglePlayer() {
     isSinglePlayer = true;
     currentRoom = 'single';
     resetLocalState();
+    pipes = [];
     
     menuScreen.style.display = 'none';
     canvas.style.display = 'block';
@@ -348,105 +335,88 @@ function jump() {
     if (gameOver) return;
     
     if (isSinglePlayer) {
-        bird.velocity = JUMP_VELOCITY;
+        bird.velocity = bird.jumpStrength;
         players[0].velocity = bird.velocity;
-    } else if (myPlayer && !myPlayer.dead) {
-        myPlayer.velocity = JUMP_VELOCITY;
-        socket.emit('jump', currentRoom);
+    } else {
+        // Find my player
+        const myPlayer = players.find(p => p.id === playerId);
+        if (myPlayer && !myPlayer.dead) {
+            myPlayer.velocity = bird.jumpStrength;
+            socket.emit('playerJump', {
+                roomId: currentRoom,
+                velocity: bird.jumpStrength
+            });
+        }
     }
 }
 
-// Update function for game state
-function update(deltaTime) {
+// Single player game update
+function singlePlayerUpdate() {
     if (gameOver) return;
     
-    if (isSinglePlayer) {
-        // Single player physics
-        bird.velocity += GRAVITY * deltaTime;
-        bird.y += bird.velocity * deltaTime;
-        
-        // Update the player object position
+    // Bird physics
+    bird.velocity += gravity;
+    if (bird.velocity > bird.maxFallSpeed) {
+        bird.velocity = bird.maxFallSpeed;
+    }
+    bird.y += bird.velocity;
+    
+    // Update the player object position
+    players[0].y = bird.y;
+    players[0].velocity = bird.velocity;
+    
+    // Check collisions
+    if (bird.y < 0) {
+        bird.y = 0;
+        bird.velocity = 0;
         players[0].y = bird.y;
         players[0].velocity = bird.velocity;
+    }
+    
+    if (bird.y + bird.height > canvas.height) {
+        bird.y = canvas.height - bird.height;
+        handleGameOver();
+        return;
+    }
+    
+    // Spawn pipes
+    if (frameCount % pipeSpawnInterval === 0) {
+        const gapY = Math.floor(Math.random() * (canvas.height - 300)) + 100;
+        pipes.push({
+            x: canvas.width,
+            top: gapY,
+            bottom: canvas.height - gapY - pipeGap,
+            width: pipeWidth,
+            passed: false
+        });
+    }
+    
+    // Update pipes
+    for (let i = pipes.length - 1; i >= 0; i--) {
+        pipes[i].x -= gameSpeed;
         
-        // Check collisions
-        if (bird.y < 0) {
-            bird.y = 0;
-            bird.velocity = 0;
-            players[0].y = bird.y;
-            players[0].velocity = bird.velocity;
+        // Remove off-screen pipes
+        if (pipes[i].x + pipeWidth < 0) {
+            pipes.splice(i, 1);
+            continue;
         }
         
-        if (bird.y + bird.height > canvas.height) {
-            bird.y = canvas.height - bird.height;
+        // Collision check
+        if (
+            bird.x < pipes[i].x + pipeWidth &&
+            bird.x + bird.width > pipes[i].x &&
+            (bird.y < pipes[i].top || bird.y + bird.height > canvas.height - pipes[i].bottom)
+        ) {
             handleGameOver();
             return;
         }
         
-        // Update pipes
-        for (let i = pipes.length - 1; i >= 0; i--) {
-            pipes[i].x -= GAME_SPEED * deltaTime;
-            
-            // Remove off-screen pipes
-            if (pipes[i].x + pipeWidth < 0) {
-                pipes.splice(i, 1);
-                continue;
-            }
-            
-            // Collision check
-            if (checkCollision(bird, pipes[i])) {
-                handleGameOver();
-                return;
-            }
-            
-            // Score points
-            if (!pipes[i].passed && pipes[i].x + pipeWidth < bird.x) {
-                pipes[i].passed = true;
-                score++;
-                players[0].score = score;
-                updateScoreDisplay();
-            }
-        }
-        
-        // Spawn new pipes in single player
-        if (frameCount % pipeSpawnInterval === 0) {
-            const minGapY = 100;
-            const maxGapY = canvas.height - 300;
-            const gapY = Math.floor(Math.random() * (maxGapY - minGapY)) + minGapY;
-            
-            pipes.push({
-                x: canvas.width,
-                top: gapY,
-                bottom: canvas.height - (gapY + pipeGap),
-                width: pipeWidth,
-                passed: false
-            });
-        }
-    } else {
-        // Multiplayer interpolation
-        if (myPlayer && !myPlayer.dead) {
-            // Interpolate between server updates
-            const timeSinceUpdate = performance.now() - lastServerUpdate;
-            if (lastServerUpdate && timeSinceUpdate < 50) { // Only interpolate for a short time
-                myPlayer.velocity += GRAVITY * deltaTime;
-                myPlayer.y += myPlayer.velocity * deltaTime;
-                
-                // Clamp position to screen bounds
-                if (myPlayer.y < 0) {
-                    myPlayer.y = 0;
-                    myPlayer.velocity = 0;
-                }
-                if (myPlayer.y + bird.height > canvas.height) {
-                    myPlayer.y = canvas.height - bird.height;
-                }
-            }
-        }
-        
-        // Interpolate pipe positions
-        if (pipes && pipes.length > 0) {
-            pipes.forEach(pipe => {
-                pipe.x -= GAME_SPEED * deltaTime;
-            });
+        // Score points
+        if (!pipes[i].passed && pipes[i].x + pipeWidth < bird.x) {
+            pipes[i].passed = true;
+            score++;
+            players[0].score = score;
+            updateScoreDisplay();
         }
     }
     
@@ -530,12 +500,14 @@ function draw() {
 }
 
 function gameLoop() {
-    const currentTime = performance.now();
-    const deltaTime = (currentTime - lastUpdateTime) / 1000; // Convert to seconds
-    lastUpdateTime = currentTime;
+    const currentTime = Date.now();
+    const deltaTime = currentTime - lastUpdateTime;
     
-    update(deltaTime);
-    draw();
+    if (deltaTime >= 16) { // Cap at ~60 FPS
+        lastUpdateTime = currentTime;
+        update();
+        draw();
+    }
     
     if (!gameOver) {
         requestAnimationFrame(gameLoop);
