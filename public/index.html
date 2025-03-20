@@ -25,7 +25,7 @@
             padding: 20px;
         }
         
-        #menu, #joinMenu, #waitingScreen, #gameOverScreen { 
+        #menu, #waitingScreen, #gameOverScreen, #fullScreen { 
             position: absolute; 
             top: 50%; 
             left: 50%; 
@@ -58,24 +58,6 @@
             background: #45a049; 
         }
         
-        input {
-            padding: 15px;
-            font-size: 16px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            width: 200px;
-            margin: 10px;
-        }
-        
-        #roomCode {
-            font-size: 24px;
-            font-weight: bold;
-            background: #f0f0f0;
-            padding: 10px;
-            border-radius: 5px;
-            margin: 10px 0;
-        }
-        
         #gameCanvas {
             display: none;
             margin: 0 auto;
@@ -98,24 +80,22 @@
         <!-- Main Menu -->
         <div id="menu">
             <h1>Flappy Bird Multiplayer</h1>
-            <button id="createRoomBtn">Create Room</button>
-            <button id="joinRoomBtn">Join Room</button>
-        </div>
-        
-        <!-- Join Room Menu -->
-        <div id="joinMenu" style="display: none;">
-            <h1>Join Room</h1>
-            <input type="text" id="roomIdInput" placeholder="Enter Room Code">
-            <button id="joinGameBtn">Join Game</button>
-            <button id="backToMenuBtn">Back</button>
+            <p>Play with another player in real-time!</p>
+            <button id="playButton">Play Game</button>
         </div>
         
         <!-- Waiting Screen -->
         <div id="waitingScreen" style="display: none;">
-            <h1>Waiting for Player</h1>
-            <p>Share this code with a friend:</p>
-            <div id="roomCode"></div>
+            <h1>Waiting for Another Player</h1>
+            <p>You'll play once another player joins...</p>
             <button id="cancelWaitingBtn">Cancel</button>
+        </div>
+        
+        <!-- Room Full Screen -->
+        <div id="fullScreen" style="display: none;">
+            <h1>Game Room Full</h1>
+            <p>Two players are already playing. Try again later!</p>
+            <button id="backToMenuBtn">Back to Menu</button>
         </div>
         
         <!-- Game Over Screen -->

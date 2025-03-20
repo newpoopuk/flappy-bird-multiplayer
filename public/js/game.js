@@ -3,7 +3,8 @@ const socket = io();
 
 // Game variables
 let canvas, ctx;
-let roomId, playerId;
+let playerId;
+let isHost = false;
 let players = [];
 let pipes = [];
 let gameStarted = false;
@@ -22,22 +23,18 @@ const birdColors = ['yellow', 'red'];
 
 // DOM Elements
 const menuScreen = document.getElementById('menu');
-const joinMenuScreen = document.getElementById('joinMenu');
 const waitingScreen = document.getElementById('waitingScreen');
+const fullScreen = document.getElementById('fullScreen');
 const gameOverScreen = document.getElementById('gameOverScreen');
-const roomCodeDisplay = document.getElementById('roomCode');
-const roomIdInput = document.getElementById('roomIdInput');
 const playerInfoDisplay = document.getElementById('playerInfo');
 const playerScoreDisplay = document.getElementById('playerScore');
 const finalScoreDisplay = document.getElementById('finalScore');
 const gameCanvasElement = document.getElementById('gameCanvas');
 
 // Button event listeners
-document.getElementById('createRoomBtn').addEventListener('click', createRoom);
-document.getElementById('joinRoomBtn').addEventListener('click', showJoinMenu);
-document.getElementById('joinGameBtn').addEventListener('click', joinRoom);
-document.getElementById('backToMenuBtn').addEventListener('click', backToMainMenu);
+document.getElementById('playButton').addEventListener('click', joinGame);
 document.getElementById('cancelWaitingBtn').addEventListener('click', backToMainMenu);
+document.getElementById('backToMenuBtn').addEventListener('click', backToMainMenu);
 document.getElementById('playAgainBtn').addEventListener('click', resetGame);
 document.getElementById('mainMenuBtn').addEventListener('click', backToMainMenu);
 
@@ -49,33 +46,19 @@ function initCanvas() {
     canvas.height = 600;
 }
 
-// Create a new game room
-function createRoom() {
-    socket.emit('createRoom');
+// Join the game
+function joinGame() {
+    socket.emit('joinGame');
     menuScreen.style.display = 'none';
     waitingScreen.style.display = 'block';
-}
-
-// Show join menu
-function showJoinMenu() {
-    menuScreen.style.display = 'none';
-    joinMenuScreen.style.display = 'block';
-}
-
-// Join an existing room
-function joinRoom() {
-    const roomIdToJoin = roomIdInput.value.trim().toUpperCase();
-    if (roomIdToJoin) {
-        socket.emit('joinRoom', roomIdToJoin);
-    }
 }
 
 // Back to main menu
 function backToMainMenu() {
     // Hide all screens
     menuScreen.style.display = 'block';
-    joinMenuScreen.style.display = 'none';
     waitingScreen.style.display = 'none';
+    fullScreen.style.display = 'none';
     gameOverScreen.style.display = 'none';
     gameCanvasElement.style.display = 'none';
     playerInfoDisplay.style.display = 'none';
@@ -83,11 +66,9 @@ function backToMainMenu() {
     // Reset game state
     resetGameState();
     
-    // Leave the room
-    if (roomId) {
-        // No need for a socket event here since the server handles disconnects
-        roomId = null;
-    }
+    // Force disconnect and reconnect to leave the game
+    socket.disconnect();
+    socket.connect();
 }
 
 // Reset game state
@@ -106,10 +87,9 @@ function resetGame() {
     gameOverScreen.style.display = 'none';
     gameCanvasElement.style.display = 'block';
     resetGameState();
-    // Let server know we're ready to start again
-    if (roomId) {
-        socket.emit('gameReset', { roomId });
-    }
+    
+    // Rejoin the game
+    socket.emit('joinGame');
 }
 
 // Start game
@@ -118,7 +98,6 @@ function startGame() {
     gameCanvasElement.style.display = 'block';
     playerInfoDisplay.style.display = 'block';
     waitingScreen.style.display = 'none';
-    joinMenuScreen.style.display = 'none';
     gameStarted = true;
     
     // Find my bird
@@ -151,7 +130,6 @@ function update() {
         
         // Send position update to server
         socket.emit('updatePosition', {
-            roomId,
             x: myBird.x,
             y: myBird.y
         });
@@ -164,7 +142,7 @@ function update() {
     
     // Generate new pipe
     if (frameCount % pipeSpawnInterval === 0 && !gameOver) {
-        if (players.length > 0 && players[0].id === playerId) {
+        if (isHost) {
             // Only host player generates pipes
             const gapPosition = Math.floor(Math.random() * (canvas.height - 300)) + 100;
             const newPipe = {
@@ -176,7 +154,7 @@ function update() {
             };
             
             pipes.push(newPipe);
-            socket.emit('generatePipe', { roomId, pipe: newPipe });
+            socket.emit('generatePipe', { pipe: newPipe });
         }
     }
     
@@ -207,8 +185,8 @@ function update() {
     }
     
     // Send updated pipes to server (only if host)
-    if (players.length > 0 && players[0].id === playerId) {
-        socket.emit('movePipes', { roomId, pipes });
+    if (isHost) {
+        socket.emit('movePipes', { pipes });
     }
 }
 
@@ -243,7 +221,7 @@ function handleGameOver() {
     if (gameOver) return;
     
     gameOver = true;
-    socket.emit('gameOver', { roomId });
+    socket.emit('gameOver');
     
     finalScoreDisplay.textContent = `Your Score: ${score}`;
     gameCanvasElement.style.display = 'none';
@@ -261,7 +239,7 @@ function jump() {
     if (!gameStarted || gameOver || !myBird) return;
     
     myBird.velocity = -8;
-    socket.emit('playerJump', { roomId });
+    socket.emit('playerJump');
 }
 
 // Listen for space bar to make the bird jump
@@ -279,22 +257,14 @@ gameCanvasElement.addEventListener('touchstart', (e) => {
 });
 
 // Socket event handlers
-socket.on('roomCreated', (data) => {
-    roomId = data.roomId;
+socket.on('gameJoined', (data) => {
     playerId = data.playerId;
-    roomCodeDisplay.textContent = roomId;
+    isHost = data.isHost;
 });
 
-socket.on('roomJoined', (data) => {
-    roomId = data.roomId;
-    playerId = data.playerId;
-    joinMenuScreen.style.display = 'none';
-    waitingScreen.style.display = 'block';
-    roomCodeDisplay.textContent = roomId;
-});
-
-socket.on('joinError', (data) => {
-    alert(data.message);
+socket.on('roomFull', (data) => {
+    waitingScreen.style.display = 'none';
+    fullScreen.style.display = 'block';
 });
 
 socket.on('playerJoined', (data) => {
@@ -332,21 +302,21 @@ socket.on('gameUpdate', (data) => {
     }
     
     // Only update pipes if received from host
-    if (players.length > 0 && players[0].id !== playerId) {
+    if (!isHost) {
         pipes = data.pipes;
     }
 });
 
 socket.on('newPipe', (data) => {
     // Only add if not host (host generates pipes locally)
-    if (players.length > 0 && players[0].id !== playerId) {
+    if (!isHost) {
         pipes.push(data.pipe);
     }
 });
 
 socket.on('pipesUpdated', (data) => {
     // Only update if not host (host updates pipes locally)
-    if (players.length > 0 && players[0].id !== playerId) {
+    if (!isHost) {
         pipes = data.pipes;
     }
 });

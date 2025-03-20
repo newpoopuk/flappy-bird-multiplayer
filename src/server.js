@@ -11,122 +11,114 @@ const io = socketIO(server);
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Game rooms storage
-const rooms = {};
+// Single game room
+const gameRoom = {
+  id: 'flappy-bird',
+  players: [],
+  pipes: [],
+  gameStarted: false
+};
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  // Create a new game room
-  socket.on('createRoom', () => {
-    const roomId = generateRoomId();
-    rooms[roomId] = {
-      players: [{ id: socket.id, x: 100, y: 300, score: 0 }],
-      pipes: [],
-      gameStarted: false
-    };
-    
-    socket.join(roomId);
-    socket.emit('roomCreated', { roomId, playerId: socket.id });
-    console.log(`Room created: ${roomId}`);
-  });
-
-  // Join an existing room
-  socket.on('joinRoom', (roomId) => {
-    const room = rooms[roomId];
-    
-    if (!room) {
-      socket.emit('joinError', { message: 'Room not found' });
+  // Join the single game room
+  socket.on('joinGame', () => {
+    // Maximum 2 players
+    if (gameRoom.players.length >= 2) {
+      socket.emit('roomFull', { message: 'Game room is full. Try again later.' });
       return;
     }
     
-    if (room.players.length >= 2) {
-      socket.emit('joinError', { message: 'Room is full' });
-      return;
-    }
+    // Add player to the room
+    const isFirstPlayer = gameRoom.players.length === 0;
+    const playerX = isFirstPlayer ? 100 : 150;
     
-    room.players.push({ id: socket.id, x: 150, y: 300, score: 0 });
-    socket.join(roomId);
+    gameRoom.players.push({ 
+      id: socket.id, 
+      x: playerX, 
+      y: 300, 
+      score: 0 
+    });
     
-    socket.emit('roomJoined', { roomId, playerId: socket.id });
-    io.to(roomId).emit('playerJoined', { players: room.players });
+    socket.join(gameRoom.id);
+    
+    socket.emit('gameJoined', { 
+      roomId: gameRoom.id, 
+      playerId: socket.id, 
+      isHost: isFirstPlayer 
+    });
+    
+    io.to(gameRoom.id).emit('playerJoined', { 
+      players: gameRoom.players 
+    });
     
     // If two players, start the game after a countdown
-    if (room.players.length === 2) {
+    if (gameRoom.players.length === 2) {
       setTimeout(() => {
-        room.gameStarted = true;
-        io.to(roomId).emit('gameStart', { players: room.players });
+        gameRoom.gameStarted = true;
+        io.to(gameRoom.id).emit('gameStart', { 
+          players: gameRoom.players 
+        });
       }, 3000);
     }
   });
 
   // Player jump event
-  socket.on('playerJump', ({ roomId }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    
-    const player = room.players.find(p => p.id === socket.id);
+  socket.on('playerJump', () => {
+    const player = gameRoom.players.find(p => p.id === socket.id);
     if (player) {
       player.velocity = -8; // Jump velocity
-      io.to(roomId).emit('playerJumped', { playerId: socket.id });
+      io.to(gameRoom.id).emit('playerJumped', { playerId: socket.id });
     }
   });
   
   // Update player position
-  socket.on('updatePosition', ({ roomId, x, y }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    
-    const player = room.players.find(p => p.id === socket.id);
+  socket.on('updatePosition', ({ x, y }) => {
+    const player = gameRoom.players.find(p => p.id === socket.id);
     if (player) {
       player.x = x;
       player.y = y;
-      io.to(roomId).emit('gameUpdate', { players: room.players, pipes: room.pipes });
+      io.to(gameRoom.id).emit('gameUpdate', { 
+        players: gameRoom.players, 
+        pipes: gameRoom.pipes 
+      });
     }
   });
   
   // Handle pipe generation
-  socket.on('generatePipe', ({ roomId, pipe }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    
+  socket.on('generatePipe', ({ pipe }) => {
     // Only host player generates pipes to avoid duplicates
-    if (room.players[0].id === socket.id) {
-      room.pipes.push(pipe);
-      io.to(roomId).emit('newPipe', { pipe });
+    const isHost = gameRoom.players.length > 0 && gameRoom.players[0].id === socket.id;
+    if (isHost) {
+      gameRoom.pipes.push(pipe);
+      io.to(gameRoom.id).emit('newPipe', { pipe });
     }
   });
   
   // Handle pipe movement
-  socket.on('movePipes', ({ roomId, pipes }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    
+  socket.on('movePipes', ({ pipes }) => {
     // Only host player updates pipes
-    if (room.players[0].id === socket.id) {
-      room.pipes = pipes;
-      io.to(roomId).emit('pipesUpdated', { pipes });
+    const isHost = gameRoom.players.length > 0 && gameRoom.players[0].id === socket.id;
+    if (isHost) {
+      gameRoom.pipes = pipes;
+      io.to(gameRoom.id).emit('pipesUpdated', { pipes });
     }
   });
   
   // Game over
-  socket.on('gameOver', ({ roomId }) => {
-    const room = rooms[roomId];
-    if (!room) return;
-    
-    io.to(roomId).emit('gameEnded', { message: 'Game Over!' });
+  socket.on('gameOver', () => {
+    io.to(gameRoom.id).emit('gameEnded', { message: 'Game Over!' });
     
     // Reset game after 3 seconds
     setTimeout(() => {
-      if (rooms[roomId]) {
-        rooms[roomId].pipes = [];
-        rooms[roomId].players.forEach(player => {
-          player.y = 300;
-          player.score = 0;
-        });
-        io.to(roomId).emit('gameReset', { players: rooms[roomId].players });
-      }
+      gameRoom.pipes = [];
+      gameRoom.players.forEach(player => {
+        player.y = 300;
+        player.score = 0;
+      });
+      io.to(gameRoom.id).emit('gameReset', { players: gameRoom.players });
     }, 3000);
   });
   
@@ -134,42 +126,28 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     
-    // Find and clean up rooms where this socket was a player
-    for (const roomId in rooms) {
-      const room = rooms[roomId];
-      const playerIndex = room.players.findIndex(p => p.id === socket.id);
+    const playerIndex = gameRoom.players.findIndex(p => p.id === socket.id);
+    
+    if (playerIndex !== -1) {
+      gameRoom.players.splice(playerIndex, 1);
       
-      if (playerIndex !== -1) {
-        room.players.splice(playerIndex, 1);
-        
-        if (room.players.length === 0) {
-          // Delete room if empty
-          delete rooms[roomId];
-          console.log(`Room ${roomId} deleted (empty)`);
-        } else {
-          // Notify remaining players
-          io.to(roomId).emit('playerLeft', { 
-            playerId: socket.id,
-            players: room.players
-          });
-        }
+      // Notify remaining players
+      io.to(gameRoom.id).emit('playerLeft', { 
+        playerId: socket.id,
+        players: gameRoom.players
+      });
+      
+      // Reset game state if game was in progress
+      if (gameRoom.gameStarted && gameRoom.players.length < 2) {
+        gameRoom.gameStarted = false;
+        gameRoom.pipes = [];
       }
     }
   });
 });
 
-// Generate a random room ID
-function generateRoomId() {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < 6; i++) {
-    result += characters.charAt(Math.floor(Math.random() * characters.length));
-  }
-  return result;
-}
-
 // Start the server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 }); 
