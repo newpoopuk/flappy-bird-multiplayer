@@ -42,9 +42,10 @@ let currentRoom = null;
 let isHost = false;
 let playerId = null;
 let players = [];
+let myPlayer = null;
 
-// Bird colors
-const BIRD_COLORS = ['yellow', 'red', 'blue', 'green'];
+// Bird colors with better contrast
+const BIRD_COLORS = ['#FFD700', '#FF4444', '#4444FF', '#44FF44'];
 
 // Connection status indicator
 const connectionIndicator = document.createElement('div');
@@ -163,6 +164,16 @@ function setupSocketEventHandlers() {
         log('Game starting with ' + data.players.length + ' players');
         players = data.players;
         pipes = data.pipes || [];
+        frameCount = data.frameCount || 0;
+        
+        // Find and store my player reference
+        myPlayer = players.find(p => p.id === playerId);
+        if (myPlayer) {
+            bird.x = myPlayer.x;
+            bird.y = myPlayer.y;
+            bird.velocity = myPlayer.velocity;
+        }
+        
         resetLocalState();
         startGame();
     });
@@ -182,14 +193,20 @@ function setupSocketEventHandlers() {
         players = data.players;
         pipes = data.pipes;
         
-        // Update local score if my player is in the list
-        const myPlayer = players.find(p => p.id === playerId);
+        // Update local player state
+        myPlayer = players.find(p => p.id === playerId);
         if (myPlayer) {
+            // Smooth position update
+            bird.x = myPlayer.x;
+            bird.y = myPlayer.y;
+            bird.velocity = myPlayer.velocity;
+            
             score = myPlayer.score;
             updateScoreDisplay();
             
             if (myPlayer.dead && !gameOver) {
                 gameOver = true;
+                handleGameOver();
             }
         }
     });
@@ -405,33 +422,70 @@ function draw() {
     // Draw pipes
     ctx.fillStyle = 'green';
     pipes.forEach(pipe => {
+        // Draw pipe body
+        ctx.fillStyle = '#2ecc71';
         ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
         ctx.fillRect(pipe.x, canvas.height - pipe.bottom, pipe.width, pipe.bottom);
+        
+        // Draw pipe edges
+        ctx.fillStyle = '#27ae60';
+        const edgeWidth = 3;
+        ctx.fillRect(pipe.x - edgeWidth, 0, edgeWidth, pipe.top);
+        ctx.fillRect(pipe.x + pipe.width, 0, edgeWidth, pipe.top);
+        ctx.fillRect(pipe.x - edgeWidth, canvas.height - pipe.bottom, edgeWidth, pipe.bottom);
+        ctx.fillRect(pipe.x + pipe.width, canvas.height - pipe.bottom, edgeWidth, pipe.bottom);
     });
     
-    // Draw birds
+    // Draw birds with improved visuals
     players.forEach((player, index) => {
-        // Skip dead players or null players
         if (!player || player.dead) return;
         
         const isMe = player.id === playerId || (isSinglePlayer && index === 0);
         const colorIndex = isMe ? 0 : (index % (BIRD_COLORS.length - 1)) + 1;
         
+        // Draw bird body
         ctx.fillStyle = BIRD_COLORS[colorIndex];
-        ctx.fillRect(player.x, player.y, bird.width, bird.height);
+        ctx.beginPath();
+        ctx.ellipse(
+            player.x + bird.width/2,
+            player.y + bird.height/2,
+            bird.width/2,
+            bird.height/2,
+            0, 0, Math.PI * 2
+        );
+        ctx.fill();
         
-        // Draw player label
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
+        // Draw wing
+        const wingOffset = Math.sin(frameCount * 0.3) * 5;
+        ctx.beginPath();
+        ctx.ellipse(
+            player.x + bird.width/3,
+            player.y + bird.height/2 + wingOffset,
+            bird.width/4,
+            bird.height/4,
+            0, 0, Math.PI * 2
+        );
+        ctx.fill();
+        
+        // Draw player label with better visibility
+        ctx.fillStyle = 'black';
+        ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(isMe ? 'You' : 'Player ' + (index + 1), player.x + bird.width/2, player.y - 10);
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 3;
+        const label = isMe ? 'You' : 'Player ' + (index + 1);
+        ctx.strokeText(label, player.x + bird.width/2, player.y - 15);
+        ctx.fillText(label, player.x + bird.width/2, player.y - 15);
     });
     
-    // Draw score
+    // Draw score with shadow for better visibility
     ctx.fillStyle = 'white';
-    ctx.font = '24px Arial';
+    ctx.font = 'bold 24px Arial';
     ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = 4;
     ctx.fillText(`Score: ${score}`, 10, 30);
+    ctx.shadowBlur = 0;
 }
 
 function gameLoop() {

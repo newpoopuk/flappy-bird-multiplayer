@@ -83,6 +83,12 @@ const PIPE_GAP = 150;
 const GAME_SPEED = 3;
 const PIPE_SPAWN_INTERVAL = 90;
 
+// Default player positions
+const PLAYER_POSITIONS = {
+    host: { x: 100, y: 300 },
+    guest: { x: 150, y: 350 }
+};
+
 // Game loop function - run on the server for each room
 function gameLoop() {
     // Process each active room
@@ -253,13 +259,14 @@ io.on('connection', (socket) => {
         // Remove player from any other rooms first
         leaveAllRooms(socket);
         
-        // Add player to the room
+        // Add player to the room with safe starting position
         const isFirstPlayer = room.players.length === 0;
+        const position = isFirstPlayer ? PLAYER_POSITIONS.host : PLAYER_POSITIONS.guest;
         
         const newPlayer = { 
             id: socket.id, 
-            x: isFirstPlayer ? 100 : 150, // Different positions
-            y: 300, 
+            x: position.x,
+            y: position.y,
             score: 0,
             velocity: 0,
             dead: false
@@ -270,29 +277,30 @@ io.on('connection', (socket) => {
         // Join the Socket.IO room
         socket.join(roomId);
         
-        // Notify the player they've joined
-        socket.emit('roomJoined', { 
-            roomId: roomId, 
-            playerId: socket.id, 
-            isHost: isFirstPlayer,
-            player: newPlayer,
-            players: room.players
-        });
-        
-        // Notify all clients in the room about the new player
-        socket.to(roomId).emit('playerJoined', { 
-            players: room.players 
-        });
-        
-        // If two players, start the game
+        // Reset game state when second player joins
         if (room.players.length === 2) {
+            resetRoom(roomId);
             room.gameStarted = true;
-            room.pipes = [];
-            room.frameCount = 0;
             
+            // Notify all players in the room about game start with initial state
             io.to(roomId).emit('gameStart', { 
                 players: room.players,
-                pipes: room.pipes
+                pipes: room.pipes,
+                frameCount: room.frameCount
+            });
+        } else {
+            // Notify the player they've joined
+            socket.emit('roomJoined', { 
+                roomId: roomId, 
+                playerId: socket.id, 
+                isHost: isFirstPlayer,
+                player: newPlayer,
+                players: room.players
+            });
+            
+            // Notify other players about the new player
+            socket.to(roomId).emit('playerJoined', { 
+                players: room.players 
             });
         }
         
