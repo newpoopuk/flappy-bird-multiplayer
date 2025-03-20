@@ -88,6 +88,15 @@ const PLAYER_POSITIONS = {
     guest: { x: 100, y: 350 }
 };
 
+// Helper function to check collision between player and pipe
+function checkCollision(player, pipe) {
+    return (
+        player.x < pipe.x + pipe.width &&
+        player.x + player.width > pipe.x &&
+        (player.y < pipe.top || player.y + player.height > 600 - pipe.bottom)
+    );
+}
+
 // Initialize a new room
 function initializeRoom(roomId) {
     if (!gameRooms[roomId]) {
@@ -96,7 +105,8 @@ function initializeRoom(roomId) {
             pipes: [],
             frameCount: 0,
             gameStarted: false,
-            lastUpdateTime: Date.now()
+            lastUpdateTime: Date.now(),
+            lastPipeTime: Date.now()
         };
     }
     return gameRooms[roomId];
@@ -110,6 +120,8 @@ function resetRoom(roomId) {
     room.pipes = [];
     room.frameCount = 0;
     room.gameStarted = false;
+    room.lastUpdateTime = Date.now();
+    room.lastPipeTime = Date.now();
     
     // Reset player positions and states
     room.players.forEach((player, index) => {
@@ -153,9 +165,8 @@ function gameLoop() {
         room.pipes = room.pipes.filter(pipe => pipe.x + pipe.width > 0);
         
         // Spawn new pipes based on time instead of frames
-        const timeSinceLastPipe = currentTime - (room.lastPipeTime || 0);
+        const timeSinceLastPipe = currentTime - room.lastPipeTime;
         if (timeSinceLastPipe >= PIPE_SPAWN_INTERVAL) {
-            const gap = PIPE_GAP;
             const minTop = 50;
             const maxTop = 300;
             const top = Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
@@ -163,7 +174,7 @@ function gameLoop() {
             room.pipes.push({
                 x: 800,
                 top: top,
-                bottom: 600 - (top + gap),
+                bottom: 600 - (top + PIPE_GAP),
                 width: PIPE_WIDTH,
                 passed: false
             });
@@ -179,18 +190,11 @@ function gameLoop() {
             player.velocity += GRAVITY * deltaTime;
             player.y += player.velocity * deltaTime;
             
-            // Check collisions
-            const playerBox = {
-                x: player.x,
-                y: player.y,
-                width: BIRD_WIDTH,
-                height: BIRD_HEIGHT
-            };
-            
             // Ground collision
             if (player.y + BIRD_HEIGHT > 600) {
                 player.dead = true;
                 player.y = 600 - BIRD_HEIGHT;
+                player.velocity = 0;
             }
             
             // Ceiling collision
@@ -199,16 +203,19 @@ function gameLoop() {
                 player.velocity = 0;
             }
             
-            // Pipe collisions
+            // Pipe collisions and scoring
             room.pipes.forEach(pipe => {
-                if (checkCollision(playerBox, pipe)) {
+                if (!player.dead && checkCollision(player, pipe)) {
                     player.dead = true;
+                    return;
                 }
                 
                 // Score points
                 if (!pipe.passed && player.x > pipe.x + pipe.width) {
                     pipe.passed = true;
-                    player.score++;
+                    if (!player.dead) {
+                        player.score++;
+                    }
                 }
             });
         });
@@ -229,6 +236,12 @@ function gameLoop() {
             io.to(roomId).emit('gameOver', {
                 players: room.players
             });
+            
+            // Reset the room after a short delay
+            setTimeout(() => {
+                resetRoom(roomId);
+                broadcastRoomStatus();
+            }, 3000);
         }
         
         room.lastUpdateTime = currentTime;

@@ -46,6 +46,7 @@ let myPlayer = null;
 let lastUpdateTime = performance.now();
 let lastServerUpdate = null;
 let serverTimestamp = 0;
+let pipes = []; // Initialize pipes array
 
 // Bird colors with better contrast
 const BIRD_COLORS = ['#FFD700', '#FF4444', '#4444FF', '#44FF44'];
@@ -251,12 +252,24 @@ function setupSocketEventHandlers() {
     });
 }
 
+// Check for collision between bird and pipe
+function checkCollision(bird, pipe) {
+    return (
+        bird.x < pipe.x + pipe.width &&
+        bird.x + bird.width > pipe.x &&
+        (bird.y < pipe.top || bird.y + bird.height > canvas.height - pipe.bottom)
+    );
+}
+
+// Reset game state
 function resetLocalState() {
     frameCount = 0;
     score = 0;
     gameOver = false;
+    pipes = [];
     bird.y = 300;
     bird.velocity = 0;
+    lastUpdateTime = performance.now();
 }
 
 // Game functions
@@ -265,7 +278,6 @@ function startSinglePlayer() {
     isSinglePlayer = true;
     currentRoom = 'single';
     resetLocalState();
-    pipes = [];
     
     menuScreen.style.display = 'none';
     canvas.style.display = 'block';
@@ -344,7 +356,7 @@ function jump() {
     }
 }
 
-// Update function for single player mode
+// Update function for game state
 function update(deltaTime) {
     if (gameOver) return;
     
@@ -382,11 +394,7 @@ function update(deltaTime) {
             }
             
             // Collision check
-            if (
-                bird.x < pipes[i].x + pipeWidth &&
-                bird.x + bird.width > pipes[i].x &&
-                (bird.y < pipes[i].top || bird.y + bird.height > canvas.height - pipes[i].bottom)
-            ) {
+            if (checkCollision(bird, pipes[i])) {
                 handleGameOver();
                 return;
             }
@@ -402,11 +410,14 @@ function update(deltaTime) {
         
         // Spawn new pipes in single player
         if (frameCount % pipeSpawnInterval === 0) {
-            const gapY = Math.floor(Math.random() * (canvas.height - 300)) + 100;
+            const minGapY = 100;
+            const maxGapY = canvas.height - 300;
+            const gapY = Math.floor(Math.random() * (maxGapY - minGapY)) + minGapY;
+            
             pipes.push({
                 x: canvas.width,
                 top: gapY,
-                bottom: canvas.height - gapY - pipeGap,
+                bottom: canvas.height - (gapY + pipeGap),
                 width: pipeWidth,
                 passed: false
             });
@@ -432,9 +443,11 @@ function update(deltaTime) {
         }
         
         // Interpolate pipe positions
-        pipes.forEach(pipe => {
-            pipe.x -= GAME_SPEED * deltaTime;
-        });
+        if (pipes && pipes.length > 0) {
+            pipes.forEach(pipe => {
+                pipe.x -= GAME_SPEED * deltaTime;
+            });
+        }
     }
     
     frameCount++;
