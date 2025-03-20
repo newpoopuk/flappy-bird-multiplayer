@@ -79,7 +79,7 @@ const gameRooms = {
 const BIRD_WIDTH = 40;
 const BIRD_HEIGHT = 30;
 const PIPE_WIDTH = 80;
-const PIPE_GAP = 150;
+const PIPE_GAP = 200;
 const GAME_SPEED = 3;
 const PIPE_SPAWN_INTERVAL = 90;
 
