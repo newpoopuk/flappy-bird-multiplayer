@@ -58,6 +58,50 @@
             background: #45a049; 
         }
         
+        .room-list {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        
+        .room-card {
+            width: 150px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .room-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .room-card.full {
+            background: #ffeeee;
+            cursor: not-allowed;
+        }
+        
+        .room-card.active {
+            background: #e8f5e9;
+        }
+        
+        .room-status {
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        .player-count {
+            font-weight: bold;
+            display: block;
+            font-size: 24px;
+            margin: 10px 0;
+        }
+        
         #gameCanvas {
             display: none;
             margin: 0 auto;
@@ -80,22 +124,26 @@
         <!-- Main Menu -->
         <div id="menu">
             <h1>Flappy Bird Multiplayer</h1>
-            <p>Play with another player in real-time!</p>
-            <button id="playButton">Play Game</button>
+            <p>Choose a room to play:</p>
+            <div class="room-list" id="roomList">
+                <!-- Room cards will be generated here -->
+            </div>
+            <p><small>Room refreshes every 3 seconds</small></p>
         </div>
         
         <!-- Waiting Screen -->
         <div id="waitingScreen" style="display: none;">
             <h1>Waiting for Another Player</h1>
             <p>You'll play once another player joins...</p>
-            <button id="cancelWaitingBtn">Cancel</button>
+            <p id="roomInfo">Room: <span id="currentRoomId"></span></p>
+            <button id="cancelWaitingBtn">Back to Rooms</button>
         </div>
         
         <!-- Room Full Screen -->
         <div id="fullScreen" style="display: none;">
-            <h1>Game Room Full</h1>
-            <p>Two players are already playing. Try again later!</p>
-            <button id="backToMenuBtn">Back to Menu</button>
+            <h1>Room Full</h1>
+            <p>This room is already full. Please choose another room.</p>
+            <button id="backToMenuBtn">Back to Rooms</button>
         </div>
         
         <!-- Game Over Screen -->
@@ -112,6 +160,7 @@
         <!-- Player Info -->
         <div id="playerInfo" style="display: none;">
             <div id="playerScore">Score: 0</div>
+            <div id="roomDisplay">Room: <span id="gameRoomId"></span></div>
         </div>
     </div>
 

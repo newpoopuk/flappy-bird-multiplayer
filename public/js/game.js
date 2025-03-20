@@ -17,6 +17,8 @@ let pipeWidth = 80;
 let pipeSpawnInterval = 90;
 let frameCount = 0;
 let gameOver = false;
+let currentRoom = null;
+let roomStatus = {};
 
 // Bird colors for different players
 const birdColors = ['yellow', 'red'];
@@ -30,6 +32,9 @@ const playerInfoDisplay = document.getElementById('playerInfo');
 const playerScoreDisplay = document.getElementById('playerScore');
 const finalScoreDisplay = document.getElementById('finalScore');
 const gameCanvasElement = document.getElementById('gameCanvas');
+const gameRoomId = document.getElementById('gameRoomId');
+const currentRoomId = document.getElementById('currentRoomId');
+const roomList = document.getElementById('roomList');
 
 // Button event listeners
 document.getElementById('playButton').addEventListener('click', joinGame);
@@ -353,4 +358,44 @@ socket.on('gameReset', (data) => {
         playerInfoDisplay.style.display = 'block';
         gameOverScreen.style.display = 'none';
     }
-}); 
+});
+
+// Update room status display
+function updateRoomStatus() {
+    socket.emit('getRoomStatus');
+}
+
+// Create room cards
+function createRoomCards() {
+    roomList.innerHTML = '';
+    for (let roomId = 1; roomId <= 4; roomId++) {
+        const room = roomStatus[roomId] || { players: [], gameStarted: false };
+        const card = document.createElement('div');
+        card.className = `room-card ${room.players.length >= 2 ? 'full' : ''} ${room.gameStarted ? 'active' : ''}`;
+        card.innerHTML = `
+            <h2>Room ${roomId}</h2>
+            <div class="player-count">${room.players.length}/2</div>
+            <div class="room-status">${room.gameStarted ? 'Game in Progress' : 'Waiting for Players'}</div>
+        `;
+        
+        if (room.players.length < 2) {
+            card.onclick = () => joinRoom(roomId);
+        }
+        
+        roomList.appendChild(card);
+    }
+}
+
+// Join a specific room
+function joinRoom(roomId) {
+    currentRoom = roomId;
+    currentRoomId.textContent = roomId;
+    gameRoomId.textContent = roomId;
+    
+    socket.emit('joinRoom', roomId);
+    menuScreen.style.display = 'none';
+    waitingScreen.style.display = 'block';
+}
+
+// Initialize game when page loads
+window.onload = init; 
