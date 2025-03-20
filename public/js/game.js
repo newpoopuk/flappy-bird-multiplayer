@@ -1,18 +1,31 @@
 // Connect to the Socket.IO server
 const socket = io({
-    transports: ['websocket'],
+    transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: 5,
-    reconnectionDelay: 1000
+    reconnectionDelay: 1000,
+    path: '/socket.io',
+    // Automatically detect if we're running on Vercel
+    ...(window.location.hostname !== 'localhost' && {
+        path: '/socket.io/',
+        addTrailingSlash: true,
+        withCredentials: true,
+        autoConnect: true
+    })
 });
 
-// Debug connection status
+// Debug connection status with more detailed logging
 socket.on('connect', () => {
     console.log('Connected to server with ID:', socket.id);
+    console.log('Connection URL:', socket.io.uri);
+    // Request room status immediately after connection
+    updateRoomStatus();
 });
 
 socket.on('connect_error', (error) => {
     console.error('Connection error:', error);
+    console.error('Connection URL:', socket.io.uri);
+    console.error('Transport:', socket.io.engine.transport.name);
 });
 
 socket.on('disconnect', () => {

@@ -11,18 +11,58 @@ const server = http.createServer(app);
 const io = socketIO(server, {
     cors: {
         origin: "*",
-        methods: ["GET", "POST"]
+        methods: ["GET", "POST"],
+        credentials: true
     },
     transports: ['websocket', 'polling'],
-    allowEIO3: true
+    allowEIO3: true,
+    path: '/socket.io/',
+    addTrailingSlash: true,
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '../public')));
 
+// Add CORS headers for all routes
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    next();
+});
+
 // Add a health check endpoint
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
+});
+
+// Add a socket.io test endpoint
+app.get('/socket-test', (req, res) => {
+    res.send(`
+        <html>
+            <body>
+                <h1>Socket.IO Test</h1>
+                <div id="status">Connecting...</div>
+                <script src="/socket.io/socket.io.js"></script>
+                <script>
+                    const socket = io({
+                        transports: ['websocket', 'polling'],
+                        path: '/socket.io/'
+                    });
+                    
+                    socket.on('connect', () => {
+                        document.getElementById('status').textContent = 'Connected! Socket ID: ' + socket.id;
+                    });
+                    
+                    socket.on('connect_error', (error) => {
+                        document.getElementById('status').textContent = 'Error: ' + error;
+                    });
+                </script>
+            </body>
+        </html>
+    `);
 });
 
 // Multiple game rooms

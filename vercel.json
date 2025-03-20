@@ -4,6 +4,12 @@
     { "src": "src/server.js", "use": "@vercel/node" }
   ],
   "routes": [
+    { "src": "/socket.io/(.*)", "dest": "src/server.js" },
+    { "src": "/socket-test", "dest": "src/server.js" },
+    { "src": "/health", "dest": "src/server.js" },
     { "src": "/(.*)", "dest": "src/server.js" }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
