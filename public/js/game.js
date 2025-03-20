@@ -1,6 +1,5 @@
 // Connect to Socket.IO server
 const socket = io({
-    transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 1000
@@ -43,25 +42,20 @@ let isHost = false;
 let playerId = null;
 let players = [];
 let myPlayer = null;
+let lastUpdateTime = Date.now();
 
 // Bird colors with better contrast
 const BIRD_COLORS = ['#FFD700', '#FF4444', '#4444FF', '#44FF44'];
 
 // Connection status indicator
-const connectionIndicator = document.createElement('div');
-connectionIndicator.id = 'connection-status';
-connectionIndicator.style.cssText = `
-    position: fixed;
-    top: 10px;
-    right: 10px;
-    padding: 5px 10px;
-    border-radius: 5px;
-    font-size: 12px;
-    font-weight: bold;
-    color: white;
-    background-color: gray;
-`;
-document.body.appendChild(connectionIndicator);
+const connectionStatus = document.createElement('div');
+connectionStatus.style.position = 'fixed';
+connectionStatus.style.top = '10px';
+connectionStatus.style.right = '10px';
+connectionStatus.style.padding = '5px 10px';
+connectionStatus.style.borderRadius = '5px';
+connectionStatus.style.fontSize = '14px';
+document.body.appendChild(connectionStatus);
 
 // DOM Elements
 const menuScreen = document.getElementById('menu');
@@ -118,22 +112,20 @@ function setupEventListeners() {
 function setupSocketEventHandlers() {
     // Connection events
     socket.on('connect', () => {
-        log('Connected to server with ID: ' + socket.id);
-        connectionIndicator.textContent = 'Connected';
-        connectionIndicator.style.backgroundColor = '#4CAF50';
+        log('Connected to server');
+        updateConnectionStatus('Connected', '#4CAF50');
+        playerId = socket.id;
         updateRoomStatus(); // Request room status immediately on connect
     });
     
     socket.on('disconnect', () => {
         log('Disconnected from server');
-        connectionIndicator.textContent = 'Disconnected';
-        connectionIndicator.style.backgroundColor = '#F44336';
+        updateConnectionStatus('Disconnected', '#f44336');
     });
     
     socket.on('connect_error', (error) => {
-        log('Connection error: ' + error);
-        connectionIndicator.textContent = 'Connection Error';
-        connectionIndicator.style.backgroundColor = '#FF9800';
+        log('Connection error:', error);
+        updateConnectionStatus('Connection Error', '#ff9800');
     });
 
     // Game events
@@ -187,20 +179,39 @@ function setupSocketEventHandlers() {
     });
 
     socket.on('gameUpdate', (data) => {
-        // Update all game state from server
         if (isSinglePlayer) return;
         
-        players = data.players;
+        console.log('Received game update:', {
+            playerCount: data.players.length,
+            pipeCount: data.pipes.length,
+            frame: data.frameCount
+        });
+        
+        // Update game state
+        frameCount = data.frameCount;
         pipes = data.pipes;
         
-        // Update local player state
+        // Update all players
+        data.players.forEach(updatedPlayer => {
+            let player = players.find(p => p.id === updatedPlayer.id);
+            if (player) {
+                // Update existing player
+                Object.assign(player, updatedPlayer);
+            } else {
+                // Add new player
+                players.push(updatedPlayer);
+                console.log('New player added:', updatedPlayer);
+            }
+        });
+        
+        // Remove disconnected players
+        players = players.filter(player => 
+            data.players.some(p => p.id === player.id)
+        );
+        
+        // Update local player reference
         myPlayer = players.find(p => p.id === playerId);
         if (myPlayer) {
-            // Smooth position update
-            bird.x = myPlayer.x;
-            bird.y = myPlayer.y;
-            bird.velocity = myPlayer.velocity;
-            
             score = myPlayer.score;
             updateScoreDisplay();
             
@@ -489,14 +500,18 @@ function draw() {
 }
 
 function gameLoop() {
-    if (gameOver) return;
+    const currentTime = Date.now();
+    const deltaTime = currentTime - lastUpdateTime;
     
-    if (isSinglePlayer) {
-        singlePlayerUpdate();
+    if (deltaTime >= 16) { // Cap at ~60 FPS
+        lastUpdateTime = currentTime;
+        update();
+        draw();
     }
     
-    draw();
-    requestAnimationFrame(gameLoop);
+    if (!gameOver) {
+        requestAnimationFrame(gameLoop);
+    }
 }
 
 function handleGameOver() {
@@ -547,4 +562,10 @@ function createRoomCards(roomStatus) {
         
         roomList.appendChild(card);
     }
+}
+
+function updateConnectionStatus(status, color) {
+    connectionStatus.textContent = status;
+    connectionStatus.style.backgroundColor = color;
+    connectionStatus.style.color = 'white';
 } 
