@@ -1,3 +1,8 @@
+// Connect to Socket.IO server
+const socket = io({
+    transports: ['websocket', 'polling']
+});
+
 // Game canvas setup
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -27,131 +32,283 @@ let pipes = [];
 let frameCount = 0;
 let score = 0;
 let gameOver = false;
+let isSinglePlayer = false;
+let currentRoom = null;
+let isHost = false;
+let playerId = null;
+let players = [];
 
-// Jump action (for both key and touch)
-function jump() {
-    if (!gameOver) {
-        // Reset upward velocity to jumpStrength
-        bird.velocity = bird.jumpStrength;
+// DOM Elements
+const menuScreen = document.getElementById('menu');
+const waitingScreen = document.getElementById('waitingScreen');
+const gameOverScreen = document.getElementById('gameOverScreen');
+const playerInfoDisplay = document.getElementById('playerInfo');
+const playerScoreDisplay = document.getElementById('playerScore');
+const finalScoreDisplay = document.getElementById('finalScore');
+const gameCanvasElement = document.getElementById('gameCanvas');
+const gameRoomId = document.getElementById('gameRoomId');
+const currentRoomId = document.getElementById('currentRoomId');
+const roomList = document.getElementById('roomList');
+
+// Initialize game when page loads
+window.onload = function() {
+    setupEventListeners();
+    updateRoomStatus();
+    setInterval(updateRoomStatus, 3000); // Update room status every 3 seconds
+};
+
+// Setup event listeners
+function setupEventListeners() {
+    // Button listeners
+    document.getElementById('singlePlayerBtn').onclick = startSinglePlayer;
+    document.getElementById('cancelWaitingBtn').onclick = backToMainMenu;
+    document.getElementById('playAgainBtn').onclick = resetGame;
+    document.getElementById('mainMenuBtn').onclick = backToMainMenu;
+
+    // Space key for jump
+    document.addEventListener('keydown', function(e) {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            jump();
+        }
+    });
+
+    // Touch event for mobile
+    canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        jump();
+    });
+}
+
+// Socket event handlers
+socket.on('connect', () => {
+    console.log('Connected to server with ID:', socket.id);
+});
+
+socket.on('roomStatus', (status) => {
+    createRoomCards(status);
+});
+
+socket.on('roomJoined', (data) => {
+    currentRoom = data.roomId;
+    playerId = data.playerId;
+    isHost = data.isHost;
+    gameRoomId.textContent = `Room ${currentRoom}`;
+});
+
+socket.on('playerJoined', (data) => {
+    players = data.players;
+});
+
+socket.on('gameStart', (data) => {
+    players = data.players;
+    pipes = data.pipes;
+    startGame();
+});
+
+socket.on('playerLeft', (data) => {
+    players = data.players;
+    if (players.length < 2) {
+        handleGameOver();
+    }
+});
+
+socket.on('gameUpdate', (data) => {
+    if (!isHost) {
+        players = data.players;
+        pipes = data.pipes;
+    }
+});
+
+socket.on('playerJumped', (data) => {
+    const jumpingPlayer = players.find(p => p.id === data.playerId);
+    if (jumpingPlayer && jumpingPlayer.id !== playerId) {
+        jumpingPlayer.velocity = data.velocity;
+    }
+});
+
+socket.on('newPipe', (data) => {
+    if (!isHost) {
+        pipes.push(data.pipe);
+    }
+});
+
+socket.on('gameEnded', () => {
+    handleGameOver();
+});
+
+// Game functions
+function startSinglePlayer() {
+    isSinglePlayer = true;
+    currentRoom = 'single';
+    resetGameState();
+    menuScreen.style.display = 'none';
+    canvas.style.display = 'block';
+    playerInfoDisplay.style.display = 'block';
+    gameRoomId.textContent = 'Single Player';
+    startGame();
+}
+
+function joinRoom(roomId) {
+    socket.emit('joinRoom', roomId);
+    menuScreen.style.display = 'none';
+    waitingScreen.style.display = 'block';
+    currentRoomId.textContent = roomId;
+}
+
+function backToMainMenu() {
+    menuScreen.style.display = 'block';
+    waitingScreen.style.display = 'none';
+    gameOverScreen.style.display = 'none';
+    canvas.style.display = 'none';
+    playerInfoDisplay.style.display = 'none';
+    resetGameState();
+    if (!isSinglePlayer && currentRoom) {
+        socket.emit('leaveRoom', { roomId: currentRoom });
+    }
+    currentRoom = null;
+    isSinglePlayer = false;
+}
+
+function resetGame() {
+    gameOverScreen.style.display = 'none';
+    if (isSinglePlayer) {
+        startSinglePlayer();
+    } else {
+        joinRoom(currentRoom);
     }
 }
 
-// Listen for key press (SPACE)
-document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') {
-        jump();
-        // Prevent default actions like scrolling
-        e.preventDefault();
+function resetGameState() {
+    players = [];
+    pipes = [];
+    score = 0;
+    frameCount = 0;
+    gameOver = false;
+    bird.y = 300;
+    bird.velocity = 0;
+    updateScoreDisplay();
+}
+
+function startGame() {
+    waitingScreen.style.display = 'none';
+    canvas.style.display = 'block';
+    playerInfoDisplay.style.display = 'block';
+    gameLoop();
+}
+
+function jump() {
+    if (!gameOver) {
+        bird.velocity = bird.jumpStrength;
+        if (!isSinglePlayer) {
+            socket.emit('playerJump', {
+                roomId: currentRoom,
+                velocity: bird.velocity
+            });
+        }
     }
-});
+}
 
-// Listen for touch events (mobile)
-canvas.addEventListener('touchstart', (e) => {
-    jump();
-    e.preventDefault();
-});
-
-// Update game physics and objects
 function update() {
-    // Apply gravity to bird's velocity
+    // Apply gravity
     bird.velocity += gravity;
-    // Cap the falling speed
     if (bird.velocity > bird.maxFallSpeed) {
         bird.velocity = bird.maxFallSpeed;
     }
     bird.y += bird.velocity;
 
-    // Check for collisions with the ceiling
+    // Check collisions
     if (bird.y < 0) {
         bird.y = 0;
         bird.velocity = 0;
     }
-
-    // Check for collision with the ground
     if (bird.y + bird.height > canvas.height) {
         bird.y = canvas.height - bird.height;
-        gameOver = true;
+        handleGameOver();
+        return;
     }
 
-    // Spawn pipes at intervals
-    if (frameCount % pipeSpawnInterval === 0) {
-        // Random gap position between 100 and canvas.height - 200
+    // Generate pipes
+    if (frameCount % pipeSpawnInterval === 0 && (isSinglePlayer || isHost)) {
         const gapY = Math.floor(Math.random() * (canvas.height - 300)) + 100;
-        pipes.push({
+        const newPipe = {
             x: canvas.width,
             top: gapY,
             bottom: canvas.height - gapY - pipeGap,
             width: pipeWidth,
             passed: false
-        });
+        };
+        pipes.push(newPipe);
+        if (!isSinglePlayer) {
+            socket.emit('generatePipe', {
+                roomId: currentRoom,
+                pipe: newPipe
+            });
+        }
     }
 
-    // Update pipes positions and check collisions
+    // Update pipes
     for (let i = pipes.length - 1; i >= 0; i--) {
         pipes[i].x -= gameSpeed;
 
-        // Remove off-screen pipes
         if (pipes[i].x + pipeWidth < 0) {
             pipes.splice(i, 1);
             continue;
         }
 
-        // Collision check:
-        // If bird is within pipe's x-range and (above gap or below gap)
+        // Collision check
         if (
             bird.x < pipes[i].x + pipeWidth &&
             bird.x + bird.width > pipes[i].x &&
             (bird.y < pipes[i].top || bird.y + bird.height > canvas.height - pipes[i].bottom)
         ) {
-            gameOver = true;
+            handleGameOver();
+            return;
         }
 
-        // Increase score if bird passes the pipe
+        // Score points
         if (!pipes[i].passed && pipes[i].x + pipeWidth < bird.x) {
             pipes[i].passed = true;
             score++;
-            // Update score display
-            document.getElementById('playerScore').textContent = `Score: ${score}`;
+            updateScoreDisplay();
         }
+    }
+
+    // Update multiplayer state
+    if (!isSinglePlayer) {
+        socket.emit('updatePosition', {
+            roomId: currentRoom,
+            x: bird.x,
+            y: bird.y,
+            velocity: bird.velocity
+        });
     }
 
     frameCount++;
 }
 
-// Draw game elements
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw bird
-    ctx.fillStyle = 'yellow';
-    ctx.fillRect(bird.x, bird.y, bird.width, bird.height);
 
     // Draw pipes
     ctx.fillStyle = 'green';
     pipes.forEach(pipe => {
-        // Top pipe
         ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
-        // Bottom pipe
         ctx.fillRect(pipe.x, canvas.height - pipe.bottom, pipe.width, pipe.bottom);
     });
 
-    // Draw game over screen
-    if (gameOver) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = 'white';
-        ctx.font = '48px Arial';
-        ctx.fillText('Game Over', canvas.width / 2 - 120, canvas.height / 2);
-        ctx.font = '24px Arial';
-        ctx.fillText('Final Score: ' + score, canvas.width / 2 - 80, canvas.height / 2 + 40);
-        
-        // Show game over screen
-        document.getElementById('gameOverScreen').style.display = 'block';
-        document.getElementById('finalScore').textContent = `Final Score: ${score}`;
+    // Draw birds
+    if (isSinglePlayer) {
+        ctx.fillStyle = 'yellow';
+        ctx.fillRect(bird.x, bird.y, bird.width, bird.height);
+    } else {
+        players.forEach((player, index) => {
+            ctx.fillStyle = player.id === playerId ? 'yellow' : 'red';
+            ctx.fillRect(player.x, player.y, bird.width, bird.height);
+        });
     }
 }
 
-// Main game loop
 function gameLoop() {
     if (!gameOver) {
         update();
@@ -160,11 +317,48 @@ function gameLoop() {
     }
 }
 
-// Initialize game when window loads
-window.onload = function() {
-    // Make sure canvas is visible
-    document.getElementById('gameCanvas').style.display = 'block';
+function handleGameOver() {
+    gameOver = true;
+    finalScoreDisplay.textContent = `Final Score: ${score}`;
+    canvas.style.display = 'none';
+    playerInfoDisplay.style.display = 'none';
+    gameOverScreen.style.display = 'block';
+
+    if (!isSinglePlayer) {
+        socket.emit('gameOver', { roomId: currentRoom });
+    }
+}
+
+function updateScoreDisplay() {
+    playerScoreDisplay.textContent = `Score: ${score}`;
+}
+
+function updateRoomStatus() {
+    socket.emit('getRoomStatus');
+}
+
+function createRoomCards(roomStatus) {
+    roomList.innerHTML = '';
     
-    // Start the game loop
-    gameLoop();
-}; 
+    for (const roomId in roomStatus) {
+        const room = roomStatus[roomId];
+        const card = document.createElement('div');
+        card.className = 'room-card';
+        if (room.players >= 2) card.className += ' full';
+        if (room.gameStarted) card.className += ' active';
+        
+        card.innerHTML = `
+            <h2>Room ${roomId}</h2>
+            <div class="player-count">${room.players}/2</div>
+            <div class="room-status">
+                ${room.gameStarted ? 'Game in Progress' : 'Waiting for Players'}
+            </div>
+        `;
+        
+        if (room.players < 2 && !room.gameStarted) {
+            card.onclick = () => joinRoom(roomId);
+        }
+        
+        roomList.appendChild(card);
+    }
+} 
