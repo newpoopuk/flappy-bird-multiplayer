@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird Multiplayer</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; background: #70c5ce; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800;
+        canvas.height = 600;
+
+        // Game variables
+        let bird1 = { x: 100, y: 300, width: 40, height: 30, velocity: 0, gravity: 0.6 };
+        let bird2 = { x: 150, y: 300, width: 40, height: 30, velocity: 0, gravity: 0.6 };
+        let pipes = [];
+        let frame = 0;
+        let gameSpeed = 3;
+        let pipeGap = 150;
+        let pipeWidth = 80;
+        let gameOver = false;
+
+        // Draw bird
+        function drawBird(bird, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(bird.x, bird.y, bird.width, bird.height);
+        }
+
+        // Draw pipes
+        function drawPipes() {
+            ctx.fillStyle = 'green';
+            pipes.forEach(pipe => {
+                ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
+                ctx.fillRect(pipe.x, canvas.height - pipe.bottom, pipe.width, pipe.bottom);
+            });
+        }
+
+        // Update game state
+        function update() {
+            // Update birds
+            [bird1, bird2].forEach(bird => {
+                bird.velocity += bird.gravity;
+                bird.y += bird.velocity;
+                
+                // Prevent bird from going off screen
+                if (bird.y + bird.height > canvas.height || bird.y < 0) {
+                    gameOver = true;
+                }
+            });
+
+            // Update pipes
+            if (frame % 90 === 0) {
+                let gapPosition = Math.random() * (canvas.height - pipeGap);
+                pipes.push({
+                    x: canvas.width,
+                    top: gapPosition,
+                    bottom: canvas.height - gapPosition - pipeGap,
+                    width: pipeWidth
+                });
+            }
+
+            pipes.forEach(pipe => {
+                pipe.x -= gameSpeed;
+                
+                // Check collisions
+                [bird1, bird2].forEach(bird => {
+                    if (bird.x < pipe.x + pipe.width &&
+                        bird.x + bird.width > pipe.x &&
+                        (bird.y < pipe.top || bird.y + bird.height > canvas.height - pipe.bottom)) {
+                        gameOver = true;
+                    }
+                });
+            });
+
+            // Remove off-screen pipes
+            pipes = pipes.filter(pipe => pipe.x + pipe.width > 0);
+        }
+
+        // Draw everything
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBird(bird1, 'yellow');
+            drawBird(bird2, 'red');
+            drawPipes();
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (gameOver) {
+                alert('Game Over!');
+                document.location.reload();
+                return;
+            }
+
+            update();
+            draw();
+            frame++;
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Handle input
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                bird1.velocity = -10;
+            }
+            if (e.code === 'ArrowUp') {
+                bird2.velocity = -10;
+            }
+        });
+
+        gameLoop();
+    </script>
+</body>
+</html>
