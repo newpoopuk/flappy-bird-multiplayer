@@ -3,193 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flappy Bird Multiplayer</title>
+    <title>Flappy Bird Clone</title>
     <style>
         body { 
-            margin: 0; 
-            overflow: hidden; 
+            background: #222;
+            color: white;
             font-family: Arial, sans-serif;
-            background: #333;
+            text-align: center;
+            margin: 0;
+            padding: 0;
         }
         
         canvas { 
-            display: block; 
-            background: #70c5ce; 
-            margin: 0 auto;
-        }
-        
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            text-align: center;
-            padding: 20px;
-        }
-        
-        #menu, #waitingScreen, #gameOverScreen, #fullScreen { 
-            position: absolute; 
-            top: 50%; 
-            left: 50%; 
-            transform: translate(-50%, -50%); 
-            text-align: center;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
-        }
-        
-        h1 {
-            color: #333;
-            margin-top: 0;
-        }
-        
-        button { 
-            padding: 15px 30px; 
-            font-size: 18px; 
-            cursor: pointer; 
-            border: none; 
-            background: #4CAF50; 
-            color: white; 
-            border-radius: 5px;
-            margin: 10px;
-            transition: background 0.3s;
-        }
-        
-        button:hover { 
-            background: #45a049; 
-        }
-        
-        .mode-btn {
-            width: 250px;
-            padding: 15px 0;
-            font-size: 22px;
-            margin: 15px auto;
+            background: #70c5ce;
             display: block;
-            background: #3498db;
-            transition: all 0.3s ease;
+            margin: 20px auto;
+            border: 2px solid #000;
         }
         
-        .mode-btn:hover {
-            background: #2980b9;
-            transform: scale(1.05);
+        #info {
+            margin: 10px;
+            color: white;
+            font-size: 18px;
         }
         
-        #roomList {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 20px;
-            margin-top: 20px;
-            max-width: 700px;
-        }
-        
-        .room-card {
-            background: white;
-            border-radius: 10px;
+        #gameOverScreen {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
             padding: 20px;
-            width: 200px;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        
-        .room-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
-        }
-        
-        .room-card.full {
-            opacity: 0.7;
-            cursor: not-allowed;
-        }
-        
-        .room-card.active {
-            border: 2px solid #4CAF50;
-        }
-        
-        .room-card h2 {
-            margin: 0 0 10px 0;
-            color: #333;
-        }
-        
-        .player-count {
-            font-size: 24px;
-            font-weight: bold;
-            margin: 10px 0;
-            color: #2196F3;
-        }
-        
-        .room-status {
-            color: #666;
-            font-size: 14px;
-        }
-        
-        #gameCanvas {
+            border-radius: 10px;
             display: none;
-            margin: 0 auto;
-            border: 3px solid black;
+        }
+        
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background: #4CAF50;
+            color: white;
+            border: none;
             border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        
+        button:hover {
+            background: #45a049;
         }
         
         #playerInfo {
-            position: absolute;
+            position: fixed;
             top: 10px;
             left: 10px;
-            background: rgba(255, 255, 255, 0.7);
+            background: rgba(0, 0, 0, 0.5);
             padding: 10px;
             border-radius: 5px;
+            color: white;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Main Menu -->
-        <div id="menu">
-            <h1>Flappy Bird Multiplayer</h1>
-            <button id="singlePlayerBtn" class="mode-btn">Play Single Player</button>
-            <p style="margin-top: 20px;">Or choose a multiplayer room:</p>
-            <div class="room-list" id="roomList">
-                <!-- Room cards will be generated here -->
-            </div>
-            <p><small>Room refreshes every 3 seconds</small></p>
-        </div>
-        
-        <!-- Waiting Screen -->
-        <div id="waitingScreen" style="display: none;">
-            <h1>Waiting for Another Player</h1>
-            <p>You'll play once another player joins...</p>
-            <p id="roomInfo">Room: <span id="currentRoomId"></span></p>
-            <button id="cancelWaitingBtn">Back to Rooms</button>
-        </div>
-        
-        <!-- Room Full Screen -->
-        <div id="fullScreen" style="display: none;">
-            <h1>Room Full</h1>
-            <p>This room is already full. Please choose another room.</p>
-            <button id="backToMenuBtn">Back to Rooms</button>
-        </div>
-        
-        <!-- Game Over Screen -->
-        <div id="gameOverScreen" style="display: none;">
-            <h1>Game Over!</h1>
-            <p id="finalScore"></p>
-            <button id="playAgainBtn">Play Again</button>
-            <button id="mainMenuBtn">Main Menu</button>
-        </div>
-        
-        <!-- Game Canvas -->
-        <canvas id="gameCanvas"></canvas>
-        
-        <!-- Player Info -->
-        <div id="playerInfo" style="display: none;">
-            <div id="playerScore">Score: 0</div>
-            <div id="roomDisplay">Room: <span id="gameRoomId"></span></div>
-        </div>
+    <h1>Flappy Bird Clone</h1>
+    <div id="info">Press SPACE or tap the screen to jump</div>
+    
+    <!-- Game Canvas -->
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <!-- Player Info -->
+    <div id="playerInfo">
+        <div id="playerScore">Score: 0</div>
+        <div id="gameRoomId"></div>
     </div>
-
-    <!-- Socket.IO Client -->
-    <script src="/socket.io/socket.io.js"></script>
-    <!-- Game Client -->
+    
+    <!-- Game Over Screen -->
+    <div id="gameOverScreen">
+        <h2>Game Over!</h2>
+        <p id="finalScore"></p>
+        <button onclick="location.reload()">Play Again</button>
+    </div>
+    
+    <!-- Game Script -->
     <script src="js/game.js"></script>
 </body>
 </html> 
