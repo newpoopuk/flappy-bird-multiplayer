@@ -1,5 +1,23 @@
 // Connect to the Socket.IO server
-const socket = io();
+const socket = io({
+    transports: ['websocket'],
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000
+});
+
+// Debug connection status
+socket.on('connect', () => {
+    console.log('Connected to server with ID:', socket.id);
+});
+
+socket.on('connect_error', (error) => {
+    console.error('Connection error:', error);
+});
+
+socket.on('disconnect', () => {
+    console.log('Disconnected from server');
+});
 
 // Game variables
 let canvas, ctx;
@@ -38,6 +56,22 @@ const gameRoomId = document.getElementById('gameRoomId');
 const currentRoomId = document.getElementById('currentRoomId');
 const roomList = document.getElementById('roomList');
 const singlePlayerBtn = document.getElementById('singlePlayerBtn');
+
+// Add countdown overlay
+const countdownOverlay = document.createElement('div');
+countdownOverlay.id = 'countdownOverlay';
+countdownOverlay.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 72px;
+    color: white;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    z-index: 1000;
+    display: none;
+`;
+document.body.appendChild(countdownOverlay);
 
 // Initialize game when page loads
 window.onload = function() {
@@ -197,11 +231,36 @@ function startGame() {
     gameCanvasElement.style.display = 'block';
     playerInfoDisplay.style.display = 'block';
     waitingScreen.style.display = 'none';
-    gameStarted = true;
     
+    if (!isSinglePlayer) {
+        // Show countdown for multiplayer only
+        countdownOverlay.style.display = 'block';
+        let count = 3;
+        countdownOverlay.textContent = count;
+        
+        const countdownInterval = setInterval(() => {
+            count--;
+            if (count > 0) {
+                countdownOverlay.textContent = count;
+            } else {
+                countdownOverlay.textContent = 'GO!';
+                setTimeout(() => {
+                    countdownOverlay.style.display = 'none';
+                    startGameplay();
+                }, 1000);
+                clearInterval(countdownInterval);
+            }
+        }, 1000);
+    } else {
+        startGameplay();
+    }
+}
+
+// Actual gameplay start
+function startGameplay() {
+    gameStarted = true;
     // Find my bird
     myBird = players.find(player => player.id === playerId);
-    
     // Start the game loop
     gameLoop();
 }
@@ -219,31 +278,39 @@ function gameLoop() {
 
 // Update game state
 function update() {
-    if (!gameStarted) return;
+    if (!gameStarted || gameOver) return;
     
     // Update my bird
     if (myBird) {
+        // Apply gravity
         myBird.velocity = myBird.velocity || 0;
         myBird.velocity += gravity;
         myBird.y += myBird.velocity;
         
-        // Send position update to server
-        socket.emit('updatePosition', {
-            roomId: currentRoom,
-            x: myBird.x,
-            y: myBird.y
-        });
-        
-        // Check if my bird went off screen (ceiling or floor)
-        if (myBird.y <= 0 || myBird.y >= canvas.height - 30) {
+        // Prevent bird from going off screen
+        if (myBird.y <= 0) {
+            myBird.y = 0;
+            myBird.velocity = 0;
+        } else if (myBird.y >= canvas.height - 30) {
+            myBird.y = canvas.height - 30;
             handleGameOver();
+            return;
+        }
+        
+        // Send position update to server
+        if (!isSinglePlayer) {
+            socket.emit('updatePosition', {
+                roomId: currentRoom,
+                x: myBird.x,
+                y: myBird.y,
+                velocity: myBird.velocity
+            });
         }
     }
     
     // Generate new pipe
     if (frameCount % pipeSpawnInterval === 0 && !gameOver) {
         if (isHost || isSinglePlayer) {
-            // Only host player or single player generates pipes
             const gapPosition = Math.floor(Math.random() * (canvas.height - 300)) + 100;
             const newPipe = {
                 x: canvas.width,
@@ -254,10 +321,12 @@ function update() {
             };
             
             pipes.push(newPipe);
-            socket.emit('generatePipe', { 
-                roomId: currentRoom,
-                pipe: newPipe 
-            });
+            if (!isSinglePlayer) {
+                socket.emit('generatePipe', { 
+                    roomId: currentRoom,
+                    pipe: newPipe 
+                });
+            }
         }
     }
     
@@ -272,7 +341,7 @@ function update() {
         }
         
         // Check if pipe was passed for scoring
-        if (!pipes[i].passed && pipes[i].x + pipeWidth < myBird.x) {
+        if (myBird && !pipes[i].passed && pipes[i].x + pipeWidth < myBird.x) {
             pipes[i].passed = true;
             score++;
             updateScoreDisplay();
@@ -284,12 +353,16 @@ function update() {
             myBird.x + 40 > pipes[i].x &&
             (myBird.y < pipes[i].top || myBird.y + 30 > canvas.height - pipes[i].bottom)) {
             handleGameOver();
+            return;
         }
     }
     
-    // Send updated pipes to server (only if host)
-    if (isHost) {
-        socket.emit('movePipes', { pipes });
+    // Send pipe updates if host
+    if (isHost && !isSinglePlayer) {
+        socket.emit('movePipes', { 
+            roomId: currentRoom,
+            pipes: pipes 
+        });
     }
 }
 
@@ -359,11 +432,13 @@ function updateScoreDisplay() {
 function jump() {
     if (!gameStarted || gameOver || !myBird) return;
     
-    if (isSinglePlayer && myBird) {
-        myBird.velocity = -8;
-    } else if (myBird) {
-        myBird.velocity = -8;
-        socket.emit('playerJump', { roomId: currentRoom });
+    myBird.velocity = -8;
+    
+    if (!isSinglePlayer) {
+        socket.emit('playerJump', { 
+            roomId: currentRoom,
+            velocity: myBird.velocity
+        });
     }
 }
 
@@ -383,6 +458,7 @@ gameCanvasElement.addEventListener('touchstart', (e) => {
 
 // Socket event handlers
 socket.on('gameJoined', (data) => {
+    console.log('Game joined:', data);
     playerId = data.playerId;
     isHost = data.isHost;
 });
@@ -397,37 +473,39 @@ socket.on('playerJoined', (data) => {
 });
 
 socket.on('gameStart', (data) => {
+    console.log('Game start event received:', data);
     players = data.players;
     isSinglePlayer = data.isSinglePlayer || false;
     startGame();
 });
 
 socket.on('playerJumped', (data) => {
+    if (isSinglePlayer) return;
+    
     const jumpingPlayer = players.find(player => player.id === data.playerId);
     if (jumpingPlayer && jumpingPlayer.id !== playerId) {
-        jumpingPlayer.velocity = -8;
+        jumpingPlayer.velocity = data.velocity;
     }
 });
 
 socket.on('gameUpdate', (data) => {
+    if (isSinglePlayer) return;
+    
     const updatedPlayers = data.players;
     
-    // Update player positions received from server but keep my bird's position locally
-    if (myBird) {
-        updatedPlayers.forEach(player => {
-            if (player.id !== playerId) {
-                const existingPlayer = players.find(p => p.id === player.id);
-                if (existingPlayer) {
-                    existingPlayer.x = player.x;
-                    existingPlayer.y = player.y;
-                }
+    // Update other players' positions
+    updatedPlayers.forEach(updatedPlayer => {
+        if (updatedPlayer.id !== playerId) {
+            const existingPlayer = players.find(p => p.id === updatedPlayer.id);
+            if (existingPlayer) {
+                existingPlayer.x = updatedPlayer.x;
+                existingPlayer.y = updatedPlayer.y;
+                existingPlayer.velocity = updatedPlayer.velocity;
             }
-        });
-    } else {
-        players = updatedPlayers;
-    }
+        }
+    });
     
-    // Only update pipes if received from host
+    // Only update pipes if not host
     if (!isHost) {
         pipes = data.pipes;
     }
@@ -484,6 +562,7 @@ socket.on('gameReset', (data) => {
 
 // Update room status display
 function updateRoomStatus() {
+    console.log("Requesting room status update");
     if (!isSinglePlayer) {
         socket.emit('getRoomStatus');
     }
@@ -491,11 +570,18 @@ function updateRoomStatus() {
 
 // Create room cards
 function createRoomCards() {
+    console.log("Creating room cards with status:", roomStatus);
     if (isSinglePlayer) return;
+
+    // Make sure roomList element exists
+    if (!roomList) {
+        console.error("Room list element not found!");
+        return;
+    }
 
     roomList.innerHTML = '';
     for (let roomId = 1; roomId <= 4; roomId++) {
-        const room = roomStatus[roomId] || { players: 0, gameStarted: false };
+        const room = roomStatus[roomId] || { players: 0, maxPlayers: 2, gameStarted: false };
         const card = document.createElement('div');
         card.className = `room-card ${room.players >= 2 ? 'full' : ''} ${room.gameStarted ? 'active' : ''}`;
         card.innerHTML = `
@@ -551,7 +637,7 @@ function setupSocketEventDebugging() {
         
         // If it's a regular room, show room ID
         if (!isSinglePlayer) {
-            gameRoomId.textContent = currentRoom;
+            gameRoomId.textContent = `Room ${currentRoom}`;
         } else {
             // For single player, show "Single Player" instead
             gameRoomId.textContent = "Single Player";
@@ -589,6 +675,22 @@ function setupSocketEventDebugging() {
     socket.on('roomStatus', (status) => {
         console.log('Room status update received:', status);
         roomStatus = status;
+        createRoomCards();
+    });
+
+    // Socket.IO event handler for room status updates
+    socket.on('roomStatusUpdate', (update) => {
+        console.log('Room status update:', update);
+        if (roomStatus[update.roomId]) {
+            roomStatus[update.roomId].players = update.players;
+            roomStatus[update.roomId].gameStarted = update.gameStarted;
+        } else {
+            roomStatus[update.roomId] = {
+                players: update.players,
+                maxPlayers: update.maxPlayers,
+                gameStarted: update.gameStarted
+            };
+        }
         createRoomCards();
     });
 }

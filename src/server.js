@@ -6,10 +6,24 @@ const path = require('path');
 // Setup Express app
 const app = express();
 const server = http.createServer(app);
-const io = socketIO(server);
+
+// Configure Socket.IO with CORS for Vercel
+const io = socketIO(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    },
+    transports: ['websocket', 'polling'],
+    allowEIO3: true
+});
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Add a health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
 
 // Multiple game rooms
 const gameRooms = {
@@ -26,6 +40,7 @@ io.on('connection', (socket) => {
 
   // Get room status for the room list
   socket.on('getRoomStatus', () => {
+    console.log('Client requested room status');
     const roomStatus = {};
     for (const roomId in gameRooms) {
       // Don't include single player room in the room list
@@ -37,7 +52,11 @@ io.on('connection', (socket) => {
         };
       }
     }
+    console.log('Sending room status:', roomStatus);
     socket.emit('roomStatus', roomStatus);
+    
+    // Also broadcast updated room status to all clients
+    io.emit('roomStatus', roomStatus);
   });
 
   // Start single player game
@@ -88,14 +107,14 @@ io.on('connection', (socket) => {
     const room = gameRooms[roomId];
     
     if (!room) {
-      socket.emit('joinError', { message: 'Room not found' });
-      return;
+        socket.emit('joinError', { message: 'Room not found' });
+        return;
     }
     
     // Maximum 2 players
     if (room.players.length >= 2) {
-      socket.emit('roomFull', { message: 'Room is full. Try another room.' });
-      return;
+        socket.emit('roomFull', { message: 'Room is full. Try another room.' });
+        return;
     }
     
     // Add player to the room
@@ -103,102 +122,119 @@ io.on('connection', (socket) => {
     const playerX = isFirstPlayer ? 100 : 150;
     
     room.players.push({ 
-      id: socket.id, 
-      x: playerX, 
-      y: 300, 
-      score: 0 
+        id: socket.id, 
+        x: playerX, 
+        y: 300, 
+        score: 0,
+        velocity: 0
     });
     
     socket.join(roomId);
     
     socket.emit('roomJoined', { 
-      roomId: roomId, 
-      playerId: socket.id, 
-      isHost: isFirstPlayer 
+        roomId: roomId, 
+        playerId: socket.id, 
+        isHost: isFirstPlayer 
     });
     
     io.to(roomId).emit('playerJoined', { 
-      players: room.players 
+        players: room.players 
     });
     
     // Update room status for all clients
     io.emit('roomStatusUpdate', {
-      roomId: roomId,
-      players: room.players.length,
-      maxPlayers: 2,
-      gameStarted: room.gameStarted
+        roomId: roomId,
+        players: room.players.length,
+        maxPlayers: 2,
+        gameStarted: room.gameStarted
     });
     
     // If two players, start the game after a countdown
     if (room.players.length === 2) {
-      setTimeout(() => {
         room.gameStarted = true;
+        
+        // Reset game state
+        room.pipes = [];
+        room.players.forEach(player => {
+            player.score = 0;
+            player.y = 300;
+            player.velocity = 0;
+        });
+        
         io.to(roomId).emit('gameStart', { 
-          players: room.players 
+            players: room.players,
+            pipes: room.pipes
         });
         
         // Update room status for all clients
         io.emit('roomStatusUpdate', {
-          roomId: roomId,
-          players: room.players.length,
-          maxPlayers: 2,
-          gameStarted: true
+            roomId: roomId,
+            players: room.players.length,
+            maxPlayers: 2,
+            gameStarted: true
         });
-      }, 3000);
     }
   });
 
   // Player jump event
-  socket.on('playerJump', ({ roomId }) => {
+  socket.on('playerJump', ({ roomId, velocity }) => {
     const room = gameRooms[roomId];
-    if (!room) return;
+    if (!room || !room.gameStarted) return;
     
     const player = room.players.find(p => p.id === socket.id);
     if (player) {
-      player.velocity = -8; // Jump velocity
-      io.to(roomId).emit('playerJumped', { playerId: socket.id });
+        player.velocity = velocity;
+        // Broadcast jump immediately to all players in the room
+        io.to(roomId).emit('playerJumped', { 
+            playerId: socket.id,
+            velocity: velocity
+        });
     }
   });
   
   // Update player position
-  socket.on('updatePosition', ({ roomId, x, y }) => {
+  socket.on('updatePosition', ({ roomId, x, y, velocity }) => {
     const room = gameRooms[roomId];
-    if (!room) return;
+    if (!room || !room.gameStarted) return;
     
     const player = room.players.find(p => p.id === socket.id);
     if (player) {
-      player.x = x;
-      player.y = y;
-      io.to(roomId).emit('gameUpdate', { 
-        players: room.players, 
-        pipes: room.pipes 
-      });
+        // Update player state
+        player.x = x;
+        player.y = y;
+        player.velocity = velocity;
+        
+        // Broadcast the update immediately to all players in the room
+        io.to(roomId).emit('gameUpdate', { 
+            players: room.players,
+            pipes: room.pipes
+        });
     }
   });
   
   // Handle pipe generation
   socket.on('generatePipe', ({ roomId, pipe }) => {
     const room = gameRooms[roomId];
-    if (!room) return;
+    if (!room || !room.gameStarted) return;
     
-    // Only host player generates pipes to avoid duplicates
+    // Only host player generates pipes
     const isHost = room.players.length > 0 && room.players[0].id === socket.id;
-    if (isHost || room.isSinglePlayer) {
-      room.pipes.push(pipe);
-      io.to(roomId).emit('newPipe', { pipe });
+    if (isHost) {
+        room.pipes.push(pipe);
+        io.to(roomId).emit('newPipe', { pipe });
     }
   });
   
   // Handle pipe movement
   socket.on('movePipes', ({ roomId, pipes }) => {
     const room = gameRooms[roomId];
-    if (!room) return;
+    if (!room || !room.gameStarted) return;
     
     // Only host player updates pipes
     const isHost = room.players.length > 0 && room.players[0].id === socket.id;
-    if (isHost || room.isSinglePlayer) {
-      room.pipes = pipes;
-      io.to(roomId).emit('pipesUpdated', { pipes });
+    if (isHost) {
+        room.pipes = pipes;
+        io.to(roomId).emit('pipesUpdated', { pipes });
     }
   });
   
