@@ -58,6 +58,21 @@
             background: #45a049; 
         }
         
+        .mode-btn {
+            width: 250px;
+            padding: 15px 0;
+            font-size: 22px;
+            margin: 15px auto;
+            display: block;
+            background: #3498db;
+            transition: all 0.3s ease;
+        }
+        
+        .mode-btn:hover {
+            background: #2980b9;
+            transform: scale(1.05);
+        }
+        
         .room-list {
             display: flex;
             flex-wrap: wrap;
@@ -124,7 +139,8 @@
         <!-- Main Menu -->
         <div id="menu">
             <h1>Flappy Bird Multiplayer</h1>
-            <p>Choose a room to play:</p>
+            <button id="singlePlayerBtn" class="mode-btn">Play Single Player</button>
+            <p style="margin-top: 20px;">Or choose a multiplayer room:</p>
             <div class="room-list" id="roomList">
                 <!-- Room cards will be generated here -->
             </div>

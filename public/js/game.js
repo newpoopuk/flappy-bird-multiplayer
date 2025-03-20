@@ -19,6 +19,7 @@ let frameCount = 0;
 let gameOver = false;
 let currentRoom = null;
 let roomStatus = {};
+let isSinglePlayer = false;
 
 // Bird colors for different players
 const birdColors = ['yellow', 'red'];
@@ -42,6 +43,7 @@ document.getElementById('cancelWaitingBtn').addEventListener('click', backToMain
 document.getElementById('backToMenuBtn').addEventListener('click', backToMainMenu);
 document.getElementById('playAgainBtn').addEventListener('click', resetGame);
 document.getElementById('mainMenuBtn').addEventListener('click', backToMainMenu);
+document.getElementById('singlePlayerBtn').addEventListener('click', startSinglePlayer);
 
 // Initialize the game canvas
 function initCanvas() {
@@ -70,8 +72,10 @@ function backToMainMenu() {
     
     // Reset game state
     resetGameState();
+    isSinglePlayer = false;
+    currentRoom = null;
     
-    // Force disconnect and reconnect to leave the game
+    // Force disconnect and reconnect to leave any room
     socket.disconnect();
     socket.connect();
 }
@@ -90,11 +94,15 @@ function resetGameState() {
 // Reset game to play again
 function resetGame() {
     gameOverScreen.style.display = 'none';
-    gameCanvasElement.style.display = 'block';
-    resetGameState();
     
-    // Rejoin the game
-    socket.emit('joinGame');
+    if (isSinglePlayer) {
+        // Restart single player game
+        startSinglePlayer();
+    } else {
+        // For multiplayer, rejoin the same room
+        resetGameState();
+        joinRoom(currentRoom);
+    }
 }
 
 // Start game
@@ -135,6 +143,7 @@ function update() {
         
         // Send position update to server
         socket.emit('updatePosition', {
+            roomId: currentRoom,
             x: myBird.x,
             y: myBird.y
         });
@@ -147,8 +156,8 @@ function update() {
     
     // Generate new pipe
     if (frameCount % pipeSpawnInterval === 0 && !gameOver) {
-        if (isHost) {
-            // Only host player generates pipes
+        if (isHost || isSinglePlayer) {
+            // Only host player or single player generates pipes
             const gapPosition = Math.floor(Math.random() * (canvas.height - 300)) + 100;
             const newPipe = {
                 x: canvas.width,
@@ -159,7 +168,10 @@ function update() {
             };
             
             pipes.push(newPipe);
-            socket.emit('generatePipe', { pipe: newPipe });
+            socket.emit('generatePipe', { 
+                roomId: currentRoom,
+                pipe: newPipe 
+            });
         }
     }
     
@@ -226,7 +238,7 @@ function handleGameOver() {
     if (gameOver) return;
     
     gameOver = true;
-    socket.emit('gameOver');
+    socket.emit('gameOver', { roomId: currentRoom });
     
     finalScoreDisplay.textContent = `Your Score: ${score}`;
     gameCanvasElement.style.display = 'none';
@@ -278,6 +290,7 @@ socket.on('playerJoined', (data) => {
 
 socket.on('gameStart', (data) => {
     players = data.players;
+    isSinglePlayer = data.isSinglePlayer || false;
     startGame();
 });
 
@@ -369,16 +382,16 @@ function updateRoomStatus() {
 function createRoomCards() {
     roomList.innerHTML = '';
     for (let roomId = 1; roomId <= 4; roomId++) {
-        const room = roomStatus[roomId] || { players: [], gameStarted: false };
+        const room = roomStatus[roomId] || { players: 0, gameStarted: false };
         const card = document.createElement('div');
-        card.className = `room-card ${room.players.length >= 2 ? 'full' : ''} ${room.gameStarted ? 'active' : ''}`;
+        card.className = `room-card ${room.players >= 2 ? 'full' : ''} ${room.gameStarted ? 'active' : ''}`;
         card.innerHTML = `
             <h2>Room ${roomId}</h2>
-            <div class="player-count">${room.players.length}/2</div>
+            <div class="player-count">${room.players}/2</div>
             <div class="room-status">${room.gameStarted ? 'Game in Progress' : 'Waiting for Players'}</div>
         `;
         
-        if (room.players.length < 2) {
+        if (room.players < 2) {
             card.onclick = () => joinRoom(roomId);
         }
         
@@ -388,9 +401,12 @@ function createRoomCards() {
 
 // Join a specific room
 function joinRoom(roomId) {
+    isSinglePlayer = false;
     currentRoom = roomId;
     currentRoomId.textContent = roomId;
     gameRoomId.textContent = roomId;
+    
+    resetGameState();
     
     socket.emit('joinRoom', roomId);
     menuScreen.style.display = 'none';
@@ -398,4 +414,80 @@ function joinRoom(roomId) {
 }
 
 // Initialize game when page loads
-window.onload = init; 
+window.onload = function() {
+    initGame();
+};
+
+// Initialize the game
+function initGame() {
+    initCanvas();
+    updateRoomStatus();
+    setInterval(updateRoomStatus, 3000);
+    
+    // Add single player button listener
+    document.getElementById('singlePlayerBtn').addEventListener('click', startSinglePlayer);
+    
+    // Space key for jump
+    document.addEventListener('keydown', function(e) {
+        if (e.code === 'Space') {
+            jump();
+        }
+    });
+    
+    // Add touch event for mobile
+    document.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        jump();
+    }, { passive: false });
+}
+
+// Start single player mode
+function startSinglePlayer() {
+    isSinglePlayer = true;
+    socket.emit('startSinglePlayer');
+    menuScreen.style.display = 'none';
+    gameCanvasElement.style.display = 'block';
+    playerInfoDisplay.style.display = 'block';
+}
+
+// Socket event handlers
+socket.on('roomJoined', (data) => {
+    playerId = data.playerId;
+    isHost = data.isHost;
+    currentRoom = data.roomId;
+    isSinglePlayer = data.isSinglePlayer || false;
+    
+    // If it's a regular room, show room ID
+    if (!isSinglePlayer) {
+        gameRoomId.textContent = currentRoom;
+    } else {
+        // For single player, show "Single Player" instead
+        gameRoomId.textContent = "Single Player";
+    }
+});
+
+socket.on('gameStart', (data) => {
+    players = data.players;
+    isSinglePlayer = data.isSinglePlayer || false;
+    startGame();
+});
+
+socket.on('gameReset', (data) => {
+    players = data.players;
+    pipes = [];
+    gameOver = false;
+    score = 0;
+    updateScoreDisplay();
+    
+    // Find my bird again
+    myBird = players.find(player => player.id === playerId);
+    
+    // Restart game
+    if (!gameStarted) {
+        startGame();
+    } else {
+        gameCanvasElement.style.display = 'block';
+        playerInfoDisplay.style.display = 'block';
+        gameOverScreen.style.display = 'none';
+    }
+}); 

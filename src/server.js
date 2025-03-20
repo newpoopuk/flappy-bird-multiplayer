@@ -16,7 +16,8 @@ const gameRooms = {
   "1": { id: "1", players: [], pipes: [], gameStarted: false },
   "2": { id: "2", players: [], pipes: [], gameStarted: false },
   "3": { id: "3", players: [], pipes: [], gameStarted: false },
-  "4": { id: "4", players: [], pipes: [], gameStarted: false }
+  "4": { id: "4", players: [], pipes: [], gameStarted: false },
+  "single": { id: "single", players: [], pipes: [], gameStarted: false, isSinglePlayer: true }
 };
 
 // Socket.IO connection handling
@@ -27,13 +28,49 @@ io.on('connection', (socket) => {
   socket.on('getRoomStatus', () => {
     const roomStatus = {};
     for (const roomId in gameRooms) {
-      roomStatus[roomId] = {
-        players: gameRooms[roomId].players.length,
-        maxPlayers: 2,
-        gameStarted: gameRooms[roomId].gameStarted
-      };
+      // Don't include single player room in the room list
+      if (roomId !== "single") {
+        roomStatus[roomId] = {
+          players: gameRooms[roomId].players.length,
+          maxPlayers: 2,
+          gameStarted: gameRooms[roomId].gameStarted
+        };
+      }
     }
     socket.emit('roomStatus', roomStatus);
+  });
+
+  // Start single player game
+  socket.on('startSinglePlayer', () => {
+    const room = gameRooms["single"];
+    
+    // Clean up any existing players in the single player room
+    room.players = [];
+    room.pipes = [];
+    
+    // Add the player to the single player room
+    room.players.push({ 
+      id: socket.id, 
+      x: 100, 
+      y: 300, 
+      score: 0 
+    });
+    
+    socket.join("single");
+    
+    socket.emit('roomJoined', { 
+      roomId: "single", 
+      playerId: socket.id, 
+      isHost: true,
+      isSinglePlayer: true
+    });
+    
+    // Start the game immediately for single player
+    room.gameStarted = true;
+    socket.emit('gameStart', { 
+      players: room.players,
+      isSinglePlayer: true
+    });
   });
 
   // Join a specific room
@@ -136,7 +173,7 @@ io.on('connection', (socket) => {
     
     // Only host player generates pipes to avoid duplicates
     const isHost = room.players.length > 0 && room.players[0].id === socket.id;
-    if (isHost) {
+    if (isHost || room.isSinglePlayer) {
       room.pipes.push(pipe);
       io.to(roomId).emit('newPipe', { pipe });
     }
@@ -149,7 +186,7 @@ io.on('connection', (socket) => {
     
     // Only host player updates pipes
     const isHost = room.players.length > 0 && room.players[0].id === socket.id;
-    if (isHost) {
+    if (isHost || room.isSinglePlayer) {
       room.pipes = pipes;
       io.to(roomId).emit('pipesUpdated', { pipes });
     }
@@ -169,7 +206,17 @@ io.on('connection', (socket) => {
         player.y = 300;
         player.score = 0;
       });
-      io.to(roomId).emit('gameReset', { players: room.players });
+      
+      // For single player, only reset if the player is still connected
+      if (room.isSinglePlayer) {
+        // Check if the player is still connected
+        const playerStillConnected = room.players.some(p => p.id === socket.id);
+        if (playerStillConnected) {
+          io.to(roomId).emit('gameReset', { players: room.players });
+        }
+      } else {
+        io.to(roomId).emit('gameReset', { players: room.players });
+      }
     }, 3000);
   });
   
@@ -185,25 +232,28 @@ io.on('connection', (socket) => {
       if (playerIndex !== -1) {
         room.players.splice(playerIndex, 1);
         
-        // Notify remaining players
-        io.to(roomId).emit('playerLeft', { 
-          playerId: socket.id,
-          players: room.players
-        });
-        
-        // Reset game state if game was in progress
-        if (room.gameStarted && room.players.length < 2) {
-          room.gameStarted = false;
-          room.pipes = [];
+        // For multiplayer rooms, notify remaining players
+        if (!room.isSinglePlayer) {
+          // Notify remaining players
+          io.to(roomId).emit('playerLeft', { 
+            playerId: socket.id,
+            players: room.players
+          });
+          
+          // Reset game state if game was in progress
+          if (room.gameStarted && room.players.length < 2) {
+            room.gameStarted = false;
+            room.pipes = [];
+          }
+          
+          // Update room status for all clients
+          io.emit('roomStatusUpdate', {
+            roomId: roomId,
+            players: room.players.length,
+            maxPlayers: 2,
+            gameStarted: room.gameStarted
+          });
         }
-        
-        // Update room status for all clients
-        io.emit('roomStatusUpdate', {
-          roomId: roomId,
-          players: room.players.length,
-          maxPlayers: 2,
-          gameStarted: room.gameStarted
-        });
       }
     }
   });
