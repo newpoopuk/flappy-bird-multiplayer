@@ -75,8 +75,12 @@ const BIRD_WIDTH = 40;
 const BIRD_HEIGHT = 30;
 const PIPE_WIDTH = 80;
 const PIPE_GAP = 150;
-const GAME_SPEED = 3;
-const PIPE_SPAWN_INTERVAL = 90;
+const GAME_SPEED = 180; // pixels per second
+const PIPE_SPAWN_INTERVAL = 1500; // milliseconds
+const GRAVITY = 600; // pixels per second squared
+const JUMP_VELOCITY = -400; // pixels per second
+const TARGET_FPS = 60;
+const FRAME_TIME = 1000 / TARGET_FPS;
 
 // Default player positions with more separation
 const PLAYER_POSITIONS = {
@@ -133,23 +137,24 @@ function gameLoop() {
             continue;
         }
         
-        // Calculate delta time for smooth updates
-        const deltaTime = currentTime - room.lastUpdateTime;
-        if (deltaTime < 16) continue; // Cap at ~60 FPS
+        // Calculate delta time in seconds
+        const deltaTime = (currentTime - room.lastUpdateTime) / 1000;
+        if (deltaTime < FRAME_TIME / 1000) continue; // Maintain target FPS
         
-        room.lastUpdateTime = currentTime;
+        // Update frame counter
         room.frameCount++;
         
-        // Update pipe positions
+        // Update pipe positions using delta time
         room.pipes.forEach(pipe => {
-            pipe.x -= GAME_SPEED;
+            pipe.x -= GAME_SPEED * deltaTime;
         });
         
         // Remove pipes that are off screen
         room.pipes = room.pipes.filter(pipe => pipe.x + pipe.width > 0);
         
-        // Spawn new pipes
-        if (room.frameCount % PIPE_SPAWN_INTERVAL === 0) {
+        // Spawn new pipes based on time instead of frames
+        const timeSinceLastPipe = currentTime - (room.lastPipeTime || 0);
+        if (timeSinceLastPipe >= PIPE_SPAWN_INTERVAL) {
             const gap = PIPE_GAP;
             const minTop = 50;
             const maxTop = 300;
@@ -162,15 +167,17 @@ function gameLoop() {
                 width: PIPE_WIDTH,
                 passed: false
             });
+            
+            room.lastPipeTime = currentTime;
         }
         
         // Update player positions and check collisions
         room.players.forEach(player => {
             if (player.dead) return;
             
-            // Apply gravity
-            player.velocity += 0.5;
-            player.y += player.velocity;
+            // Apply gravity using delta time
+            player.velocity += GRAVITY * deltaTime;
+            player.y += player.velocity * deltaTime;
             
             // Check collisions
             const playerBox = {
@@ -210,14 +217,9 @@ function gameLoop() {
         const gameState = {
             players: room.players,
             pipes: room.pipes,
-            frameCount: room.frameCount
+            frameCount: room.frameCount,
+            timestamp: currentTime
         };
-        
-        console.log(`Room ${roomId} update:`, {
-            playerCount: room.players.length,
-            pipeCount: room.pipes.length,
-            frame: room.frameCount
-        });
         
         io.to(roomId).emit('gameUpdate', gameState);
         
@@ -228,6 +230,8 @@ function gameLoop() {
                 players: room.players
             });
         }
+        
+        room.lastUpdateTime = currentTime;
     }
 }
 
@@ -335,7 +339,7 @@ io.on('connection', (socket) => {
         
         const player = room.players.find(p => p.id === socket.id);
         if (player && !player.dead) {
-            player.velocity = -8;
+            player.velocity = JUMP_VELOCITY;
             console.log(`Player ${socket.id} jumped in room ${roomId}`);
         }
     });
@@ -373,8 +377,8 @@ io.on('connection', (socket) => {
     });
 });
 
-// Start game loop
-setInterval(gameLoop, 16); // ~60 FPS
+// Start game loop with fixed time step
+setInterval(gameLoop, FRAME_TIME);
 
 // Start server
 const PORT = process.env.PORT || 3001;
