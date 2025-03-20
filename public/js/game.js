@@ -26,8 +26,8 @@ const bird = {
 const gravity = 0.3;  // gravitational acceleration
 
 // Pipe settings
-const pipeGap = 150;
 const pipeWidth = 80;
+const pipeGap = 200;
 const pipeSpawnInterval = 90; // in frames
 const gameSpeed = 3;
 let pipes = [];
