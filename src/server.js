@@ -42,6 +42,8 @@ io.on('connection', (socket) => {
 
   // Start single player game
   socket.on('startSinglePlayer', () => {
+    console.log('Starting single player mode for:', socket.id);
+    
     const room = gameRooms["single"];
     
     // Clean up any existing players in the single player room
@@ -56,7 +58,11 @@ io.on('connection', (socket) => {
       score: 0 
     });
     
+    console.log('Player added to single player room:', room.players);
+    
     socket.join("single");
+    
+    console.log('Socket joined single player room');
     
     socket.emit('roomJoined', { 
       roomId: "single", 
@@ -65,12 +71,16 @@ io.on('connection', (socket) => {
       isSinglePlayer: true
     });
     
+    console.log('roomJoined event emitted');
+    
     // Start the game immediately for single player
     room.gameStarted = true;
     socket.emit('gameStart', { 
       players: room.players,
       isSinglePlayer: true
     });
+    
+    console.log('gameStart event emitted');
   });
 
   // Join a specific room
