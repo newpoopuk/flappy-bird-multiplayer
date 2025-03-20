@@ -162,11 +162,8 @@ function gameLoop() {
 
 // Initialize game when window loads
 window.onload = function() {
-    // Hide menu and show game canvas
-    document.getElementById('menu').style.display = 'none';
+    // Make sure canvas is visible
     document.getElementById('gameCanvas').style.display = 'block';
-    document.getElementById('playerInfo').style.display = 'block';
-    document.getElementById('gameRoomId').textContent = 'Single Player';
     
     // Start the game loop
     gameLoop();
