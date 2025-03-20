@@ -1,5 +1,6 @@
 // Connect to Socket.IO server
 const socket = io({
+    transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 1000
@@ -26,8 +27,8 @@ const bird = {
 const gravity = 0.3;  // gravitational acceleration
 
 // Pipe settings
-const pipeGap = 150;
 const pipeWidth = 80;
+const pipeGap = 200;
 const pipeSpawnInterval = 90; // in frames
 const gameSpeed = 3;
 let pipes = [];
@@ -41,21 +42,25 @@ let currentRoom = null;
 let isHost = false;
 let playerId = null;
 let players = [];
-let myPlayer = null;
-let lastUpdateTime = Date.now();
 
-// Bird colors with better contrast
-const BIRD_COLORS = ['#FFD700', '#FF4444', '#4444FF', '#44FF44'];
+// Bird colors
+const BIRD_COLORS = ['yellow', 'red', 'blue', 'green'];
 
 // Connection status indicator
-const connectionStatus = document.createElement('div');
-connectionStatus.style.position = 'fixed';
-connectionStatus.style.top = '10px';
-connectionStatus.style.right = '10px';
-connectionStatus.style.padding = '5px 10px';
-connectionStatus.style.borderRadius = '5px';
-connectionStatus.style.fontSize = '14px';
-document.body.appendChild(connectionStatus);
+const connectionIndicator = document.createElement('div');
+connectionIndicator.id = 'connection-status';
+connectionIndicator.style.cssText = `
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    background-color: gray;
+`;
+document.body.appendChild(connectionIndicator);
 
 // DOM Elements
 const menuScreen = document.getElementById('menu');
@@ -112,20 +117,22 @@ function setupEventListeners() {
 function setupSocketEventHandlers() {
     // Connection events
     socket.on('connect', () => {
-        log('Connected to server');
-        updateConnectionStatus('Connected', '#4CAF50');
-        playerId = socket.id;
+        log('Connected to server with ID: ' + socket.id);
+        connectionIndicator.textContent = 'Connected';
+        connectionIndicator.style.backgroundColor = '#4CAF50';
         updateRoomStatus(); // Request room status immediately on connect
     });
     
     socket.on('disconnect', () => {
         log('Disconnected from server');
-        updateConnectionStatus('Disconnected', '#f44336');
+        connectionIndicator.textContent = 'Disconnected';
+        connectionIndicator.style.backgroundColor = '#F44336';
     });
     
     socket.on('connect_error', (error) => {
-        log('Connection error:', error);
-        updateConnectionStatus('Connection Error', '#ff9800');
+        log('Connection error: ' + error);
+        connectionIndicator.textContent = 'Connection Error';
+        connectionIndicator.style.backgroundColor = '#FF9800';
     });
 
     // Game events
@@ -156,16 +163,6 @@ function setupSocketEventHandlers() {
         log('Game starting with ' + data.players.length + ' players');
         players = data.players;
         pipes = data.pipes || [];
-        frameCount = data.frameCount || 0;
-        
-        // Find and store my player reference
-        myPlayer = players.find(p => p.id === playerId);
-        if (myPlayer) {
-            bird.x = myPlayer.x;
-            bird.y = myPlayer.y;
-            bird.velocity = myPlayer.velocity;
-        }
-        
         resetLocalState();
         startGame();
     });
@@ -179,45 +176,20 @@ function setupSocketEventHandlers() {
     });
 
     socket.on('gameUpdate', (data) => {
+        // Update all game state from server
         if (isSinglePlayer) return;
         
-        console.log('Received game update:', {
-            playerCount: data.players.length,
-            pipeCount: data.pipes.length,
-            frame: data.frameCount
-        });
-        
-        // Update game state
-        frameCount = data.frameCount;
+        players = data.players;
         pipes = data.pipes;
         
-        // Update all players
-        data.players.forEach(updatedPlayer => {
-            let player = players.find(p => p.id === updatedPlayer.id);
-            if (player) {
-                // Update existing player
-                Object.assign(player, updatedPlayer);
-            } else {
-                // Add new player
-                players.push(updatedPlayer);
-                console.log('New player added:', updatedPlayer);
-            }
-        });
-        
-        // Remove disconnected players
-        players = players.filter(player => 
-            data.players.some(p => p.id === player.id)
-        );
-        
-        // Update local player reference
-        myPlayer = players.find(p => p.id === playerId);
+        // Update local score if my player is in the list
+        const myPlayer = players.find(p => p.id === playerId);
         if (myPlayer) {
             score = myPlayer.score;
             updateScoreDisplay();
             
             if (myPlayer.dead && !gameOver) {
                 gameOver = true;
-                handleGameOver();
             }
         }
     });
@@ -433,85 +405,44 @@ function draw() {
     // Draw pipes
     ctx.fillStyle = 'green';
     pipes.forEach(pipe => {
-        // Draw pipe body
-        ctx.fillStyle = '#2ecc71';
         ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
         ctx.fillRect(pipe.x, canvas.height - pipe.bottom, pipe.width, pipe.bottom);
-        
-        // Draw pipe edges
-        ctx.fillStyle = '#27ae60';
-        const edgeWidth = 3;
-        ctx.fillRect(pipe.x - edgeWidth, 0, edgeWidth, pipe.top);
-        ctx.fillRect(pipe.x + pipe.width, 0, edgeWidth, pipe.top);
-        ctx.fillRect(pipe.x - edgeWidth, canvas.height - pipe.bottom, edgeWidth, pipe.bottom);
-        ctx.fillRect(pipe.x + pipe.width, canvas.height - pipe.bottom, edgeWidth, pipe.bottom);
     });
     
-    // Draw birds with improved visuals
+    // Draw birds
     players.forEach((player, index) => {
+        // Skip dead players or null players
         if (!player || player.dead) return;
         
         const isMe = player.id === playerId || (isSinglePlayer && index === 0);
         const colorIndex = isMe ? 0 : (index % (BIRD_COLORS.length - 1)) + 1;
         
-        // Draw bird body
         ctx.fillStyle = BIRD_COLORS[colorIndex];
-        ctx.beginPath();
-        ctx.ellipse(
-            player.x + bird.width/2,
-            player.y + bird.height/2,
-            bird.width/2,
-            bird.height/2,
-            0, 0, Math.PI * 2
-        );
-        ctx.fill();
+        ctx.fillRect(player.x, player.y, bird.width, bird.height);
         
-        // Draw wing
-        const wingOffset = Math.sin(frameCount * 0.3) * 5;
-        ctx.beginPath();
-        ctx.ellipse(
-            player.x + bird.width/3,
-            player.y + bird.height/2 + wingOffset,
-            bird.width/4,
-            bird.height/4,
-            0, 0, Math.PI * 2
-        );
-        ctx.fill();
-        
-        // Draw player label with better visibility
-        ctx.fillStyle = 'black';
-        ctx.font = 'bold 14px Arial';
+        // Draw player label
+        ctx.fillStyle = 'white';
+        ctx.font = '12px Arial';
         ctx.textAlign = 'center';
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 3;
-        const label = isMe ? 'You' : 'Player ' + (index + 1);
-        ctx.strokeText(label, player.x + bird.width/2, player.y - 15);
-        ctx.fillText(label, player.x + bird.width/2, player.y - 15);
+        ctx.fillText(isMe ? 'You' : 'Player ' + (index + 1), player.x + bird.width/2, player.y - 10);
     });
     
-    // Draw score with shadow for better visibility
+    // Draw score
     ctx.fillStyle = 'white';
-    ctx.font = 'bold 24px Arial';
+    ctx.font = '24px Arial';
     ctx.textAlign = 'left';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-    ctx.shadowBlur = 4;
     ctx.fillText(`Score: ${score}`, 10, 30);
-    ctx.shadowBlur = 0;
 }
 
 function gameLoop() {
-    const currentTime = Date.now();
-    const deltaTime = currentTime - lastUpdateTime;
+    if (gameOver) return;
     
-    if (deltaTime >= 16) { // Cap at ~60 FPS
-        lastUpdateTime = currentTime;
-        update();
-        draw();
+    if (isSinglePlayer) {
+        singlePlayerUpdate();
     }
     
-    if (!gameOver) {
-        requestAnimationFrame(gameLoop);
-    }
+    draw();
+    requestAnimationFrame(gameLoop);
 }
 
 function handleGameOver() {
@@ -562,10 +493,4 @@ function createRoomCards(roomStatus) {
         
         roomList.appendChild(card);
     }
-}
-
-function updateConnectionStatus(status, color) {
-    connectionStatus.textContent = status;
-    connectionStatus.style.backgroundColor = color;
-    connectionStatus.style.color = 'white';
 } 

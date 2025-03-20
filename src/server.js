@@ -67,167 +67,136 @@ app.get('/room-debug', (req, res) => {
     res.json(gameRooms);
 });
 
-// Game state management
-const gameRooms = {};
+// Multiple game rooms
+const gameRooms = {
+    "1": { id: "1", players: [], pipes: [], gameStarted: false },
+    "2": { id: "2", players: [], pipes: [], gameStarted: false },
+    "3": { id: "3", players: [], pipes: [], gameStarted: false },
+    "4": { id: "4", players: [], pipes: [], gameStarted: false }
+};
 
 // Game constants
 const BIRD_WIDTH = 40;
 const BIRD_HEIGHT = 30;
 const PIPE_WIDTH = 80;
-const PIPE_GAP = 150;
+const PIPE_GAP = 200;
 const GAME_SPEED = 3;
 const PIPE_SPAWN_INTERVAL = 90;
 
-// Default player positions with more separation
-const PLAYER_POSITIONS = {
-    host: { x: 100, y: 250 },
-    guest: { x: 100, y: 350 }
-};
-
-// Initialize a new room
-function initializeRoom(roomId) {
-    if (!gameRooms[roomId]) {
-        gameRooms[roomId] = {
-            players: [],
-            pipes: [],
-            frameCount: 0,
-            gameStarted: false,
-            lastUpdateTime: Date.now()
-        };
-    }
-    return gameRooms[roomId];
-}
-
-// Reset room state
-function resetRoom(roomId) {
-    const room = gameRooms[roomId];
-    if (!room) return;
-
-    room.pipes = [];
-    room.frameCount = 0;
-    room.gameStarted = false;
-    
-    // Reset player positions and states
-    room.players.forEach((player, index) => {
-        const position = index === 0 ? PLAYER_POSITIONS.host : PLAYER_POSITIONS.guest;
-        player.x = position.x;
-        player.y = position.y;
-        player.velocity = 0;
-        player.score = 0;
-        player.dead = false;
-    });
-    
-    console.log(`Room ${roomId} reset with ${room.players.length} players:`, room.players);
-}
-
-// Game loop function
+// Game loop function - run on the server for each room
 function gameLoop() {
-    const currentTime = Date.now();
-    
     // Process each active room
     for (const roomId in gameRooms) {
         const room = gameRooms[roomId];
         
-        // Skip inactive rooms or rooms with less than 2 players
+        // Skip inactive rooms
         if (!room.gameStarted || room.players.length < 2) {
             continue;
         }
         
-        // Calculate delta time for smooth updates
-        const deltaTime = currentTime - room.lastUpdateTime;
-        if (deltaTime < 16) continue; // Cap at ~60 FPS
-        
-        room.lastUpdateTime = currentTime;
-        room.frameCount++;
-        
         // Update pipe positions
-        room.pipes.forEach(pipe => {
-            pipe.x -= GAME_SPEED;
-        });
-        
-        // Remove pipes that are off screen
-        room.pipes = room.pipes.filter(pipe => pipe.x + pipe.width > 0);
-        
-        // Spawn new pipes
-        if (room.frameCount % PIPE_SPAWN_INTERVAL === 0) {
-            const gap = PIPE_GAP;
-            const minTop = 50;
-            const maxTop = 300;
-            const top = Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
+        for (let i = room.pipes.length - 1; i >= 0; i--) {
+            room.pipes[i].x -= GAME_SPEED;
             
+            // Remove pipes that are off-screen
+            if (room.pipes[i].x + PIPE_WIDTH < 0) {
+                room.pipes.splice(i, 1);
+                continue;
+            }
+            
+            // Check for collisions and score updates for each player
+            room.players.forEach(player => {
+                // Check pipe collision
+                if (
+                    player.x < room.pipes[i].x + PIPE_WIDTH &&
+                    player.x + BIRD_WIDTH > room.pipes[i].x &&
+                    (player.y < room.pipes[i].top || player.y + BIRD_HEIGHT > 600 - room.pipes[i].bottom)
+                ) {
+                    player.dead = true;
+                }
+                
+                // Check for scoring
+                if (!room.pipes[i].passed && room.pipes[i].x + PIPE_WIDTH < player.x) {
+                    room.pipes[i].passed = true;
+                    if (!player.dead) {
+                        player.score++;
+                    }
+                }
+            });
+        }
+        
+        // Generate new pipes at intervals
+        if (room.frameCount % PIPE_SPAWN_INTERVAL === 0) {
+            const gapPosition = Math.floor(Math.random() * (600 - 300)) + 100;
             room.pipes.push({
-                x: 800,
-                top: top,
-                bottom: 600 - (top + gap),
+                x: 800, // Canvas width
+                top: gapPosition,
+                bottom: 600 - gapPosition - PIPE_GAP,
                 width: PIPE_WIDTH,
                 passed: false
             });
         }
         
-        // Update player positions and check collisions
+        // Apply gravity to each player
         room.players.forEach(player => {
-            if (player.dead) return;
-            
-            // Apply gravity
-            player.velocity += 0.5;
-            player.y += player.velocity;
-            
-            // Check collisions
-            const playerBox = {
-                x: player.x,
-                y: player.y,
-                width: BIRD_WIDTH,
-                height: BIRD_HEIGHT
-            };
-            
-            // Ground collision
-            if (player.y + BIRD_HEIGHT > 600) {
-                player.dead = true;
-                player.y = 600 - BIRD_HEIGHT;
-            }
-            
-            // Ceiling collision
-            if (player.y < 0) {
-                player.y = 0;
-                player.velocity = 0;
-            }
-            
-            // Pipe collisions
-            room.pipes.forEach(pipe => {
-                if (checkCollision(playerBox, pipe)) {
-                    player.dead = true;
+            if (!player.dead) {
+                player.velocity += 0.3; // Gravity
+                if (player.velocity > 12) player.velocity = 12; // Max fall speed
+                player.y += player.velocity;
+                
+                // Check for floor/ceiling collisions
+                if (player.y < 0) {
+                    player.y = 0;
+                    player.velocity = 0;
                 }
                 
-                // Score points
-                if (!pipe.passed && player.x > pipe.x + pipe.width) {
-                    pipe.passed = true;
-                    player.score++;
+                if (player.y + BIRD_HEIGHT > 600) {
+                    player.y = 600 - BIRD_HEIGHT;
+                    player.dead = true;
                 }
-            });
+            }
         });
         
-        // Broadcast game state to all players in the room
-        const gameState = {
-            players: room.players,
-            pipes: room.pipes,
-            frameCount: room.frameCount
-        };
-        
-        console.log(`Room ${roomId} update:`, {
-            playerCount: room.players.length,
-            pipeCount: room.pipes.length,
-            frame: room.frameCount
-        });
-        
-        io.to(roomId).emit('gameUpdate', gameState);
-        
-        // Check if game should end (all players dead)
-        if (room.players.every(player => player.dead)) {
-            room.gameStarted = false;
-            io.to(roomId).emit('gameOver', {
+        // Check if all players are dead
+        const allDead = room.players.every(player => player.dead);
+        if (allDead && room.players.length > 0) {
+            // Send game over to all clients in the room
+            io.to(roomId).emit('gameEnded', {
                 players: room.players
             });
+            
+            // Reset the game state after a delay
+            setTimeout(() => {
+                resetRoom(roomId);
+                // Broadcast updated room status
+                broadcastRoomStatus();
+            }, 3000);
+        } else {
+            // Send game update to all clients in the room
+            io.to(roomId).emit('gameUpdate', {
+                players: room.players,
+                pipes: room.pipes
+            });
         }
+        
+        // Increment frame counter
+        room.frameCount = (room.frameCount || 0) + 1;
+    }
+}
+
+// Reset a room to initial state
+function resetRoom(roomId) {
+    const room = gameRooms[roomId];
+    if (room) {
+        room.pipes = [];
+        room.gameStarted = false;
+        room.frameCount = 0;
+        room.players.forEach(player => {
+            player.y = 300;
+            player.velocity = 0;
+            player.score = 0;
+            player.dead = false;
+        });
     }
 }
 
@@ -244,6 +213,9 @@ function broadcastRoomStatus() {
     io.emit('roomStatus', roomStatus);
 }
 
+// Start the game loop (20 FPS)
+setInterval(gameLoop, 50);
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
@@ -259,68 +231,68 @@ io.on('connection', (socket) => {
             };
         }
         socket.emit('roomStatus', roomStatus);
-        console.log('Sent room status:', roomStatus);
     });
 
-    // Join room handler
+    // Join a specific room
     socket.on('joinRoom', (roomId) => {
         console.log(`Player ${socket.id} attempting to join room ${roomId}`);
+        const room = gameRooms[roomId];
         
-        let room = gameRooms[roomId];
         if (!room) {
-            room = initializeRoom(roomId);
+            console.log(`Room ${roomId} not found`);
+            socket.emit('joinError', { message: 'Room not found' });
+            return;
         }
         
         if (room.players.length >= 2) {
             console.log(`Room ${roomId} is full`);
-            socket.emit('joinError', { message: 'Room is full' });
+            socket.emit('roomFull', { message: 'Room is full' });
             return;
         }
         
-        // Remove player from other rooms first
-        for (const id in gameRooms) {
-            const r = gameRooms[id];
-            r.players = r.players.filter(p => p.id !== socket.id);
-        }
+        // Remove player from any other rooms first
+        leaveAllRooms(socket);
         
         // Add player to the room
         const isFirstPlayer = room.players.length === 0;
-        const position = isFirstPlayer ? PLAYER_POSITIONS.host : PLAYER_POSITIONS.guest;
         
-        const newPlayer = {
-            id: socket.id,
-            x: position.x,
-            y: position.y,
-            velocity: 0,
+        const newPlayer = { 
+            id: socket.id, 
+            x: isFirstPlayer ? 100 : 150, // Different positions
+            y: 300, 
             score: 0,
-            dead: false,
-            isHost: isFirstPlayer
+            velocity: 0,
+            dead: false
         };
         
         room.players.push(newPlayer);
+        
+        // Join the Socket.IO room
         socket.join(roomId);
         
-        console.log(`Player ${socket.id} joined room ${roomId}. Players:`, room.players);
+        // Notify the player they've joined
+        socket.emit('roomJoined', { 
+            roomId: roomId, 
+            playerId: socket.id, 
+            isHost: isFirstPlayer,
+            player: newPlayer,
+            players: room.players
+        });
         
-        // Handle game start when second player joins
+        // Notify all clients in the room about the new player
+        socket.to(roomId).emit('playerJoined', { 
+            players: room.players 
+        });
+        
+        // If two players, start the game
         if (room.players.length === 2) {
-            resetRoom(roomId);
             room.gameStarted = true;
-            room.lastUpdateTime = Date.now();
+            room.pipes = [];
+            room.frameCount = 0;
             
-            io.to(roomId).emit('gameStart', {
+            io.to(roomId).emit('gameStart', { 
                 players: room.players,
-                pipes: room.pipes,
-                frameCount: room.frameCount
-            });
-            
-            console.log(`Game started in room ${roomId}`);
-        } else {
-            socket.emit('roomJoined', {
-                roomId,
-                playerId: socket.id,
-                isHost: isFirstPlayer,
-                players: room.players
+                pipes: room.pipes
             });
         }
         
@@ -328,53 +300,76 @@ io.on('connection', (socket) => {
         broadcastRoomStatus();
     });
 
-    // Player jump handler
-    socket.on('jump', (roomId) => {
+    // Player jump event
+    socket.on('playerJump', ({ roomId, velocity }) => {
         const room = gameRooms[roomId];
-        if (!room) return;
+        if (!room || !room.gameStarted) return;
         
         const player = room.players.find(p => p.id === socket.id);
         if (player && !player.dead) {
-            player.velocity = -8;
-            console.log(`Player ${socket.id} jumped in room ${roomId}`);
+            player.velocity = velocity;
+            
+            // Broadcast to all players in the room (including the sender)
+            io.to(roomId).emit('playerJumped', { 
+                playerId: socket.id,
+                velocity: velocity
+            });
         }
     });
+    
+    // Handle client-side update
+    socket.on('updatePosition', ({ roomId, y, velocity }) => {
+        // We handle this on the server side now, so this is just for validation
+        // or client-side prediction if needed
+    });
+    
+    // Leave room event
+    socket.on('leaveRoom', ({ roomId }) => {
+        leaveRoom(socket, roomId);
+    });
 
-    // Disconnect handler
+    // Handle disconnection
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         
         // Remove player from all rooms
-        for (const roomId in gameRooms) {
-            const room = gameRooms[roomId];
-            const playerIndex = room.players.findIndex(p => p.id === socket.id);
-            
-            if (playerIndex !== -1) {
-                room.players.splice(playerIndex, 1);
-                console.log(`Player ${socket.id} removed from room ${roomId}`);
-                
-                if (room.players.length === 0) {
-                    delete gameRooms[roomId];
-                    console.log(`Room ${roomId} deleted - no players remaining`);
-                } else {
-                    // Reset room if game was in progress
-                    if (room.gameStarted) {
-                        resetRoom(roomId);
-                        io.to(roomId).emit('playerLeft', {
-                            playerId: socket.id,
-                            players: room.players
-                        });
-                    }
-                }
-                
-                broadcastRoomStatus();
-            }
-        }
+        leaveAllRooms(socket);
     });
+    
+    // Helper function to leave a specific room
+    function leaveRoom(socket, roomId) {
+        const room = gameRooms[roomId];
+        if (!room) return;
+        
+        const playerIndex = room.players.findIndex(p => p.id === socket.id);
+        if (playerIndex !== -1) {
+            // Remove player
+            room.players.splice(playerIndex, 1);
+            
+            // Leave the socket.io room
+            socket.leave(roomId);
+            
+            // If game was started, end it
+            if (room.gameStarted) {
+                room.gameStarted = false;
+                io.to(roomId).emit('playerLeft', {
+                    players: room.players
+                });
+                resetRoom(roomId);
+            }
+            
+            // Broadcast updated room status
+            broadcastRoomStatus();
+        }
+    }
+    
+    // Helper function to leave all rooms
+    function leaveAllRooms(socket) {
+        for (const roomId in gameRooms) {
+            leaveRoom(socket, roomId);
+        }
+    }
 });
-
-// Start game loop
-setInterval(gameLoop, 16); // ~60 FPS
 
 // Start server
 const PORT = process.env.PORT || 3001;
